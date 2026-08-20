@@ -13,7 +13,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from src.config import settings
 from src.database import async_session_maker
-from src.discord_bot import announce_assignment, announce_no_reviewer_available
+from src.discord_notify import announce_assignment, announce_no_reviewer_available
 from src.reviews import assign_reviewer, resolve_reviews
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -66,7 +66,7 @@ async def webhook(
                 pr_number=pr_number,
                 pr_title=pr["title"],
                 pr_url=pr["html_url"],
-                reviewer_discord_username=reviewer.discord_username,
+                reviewer_discord_id=reviewer.discord_id,
                 author_github_username=pr["user"]["login"],
             )
     elif action == "closed":

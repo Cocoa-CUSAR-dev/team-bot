@@ -30,7 +30,7 @@ async def main() -> None:
         for entry in roster:
             session.add(
                 Person(
-                    discord_username=entry["discord_username"],
+                    discord_id=entry["discord_id"],
                     github_username=entry["github_username"],
                     display_name=entry.get("display_name", entry["github_username"]),
                 )

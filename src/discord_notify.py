@@ -1,24 +1,19 @@
-"""น้องโกโก้ -- the bot's persona/display name in every message it posts.
+"""น้องโกโก้ -- posts via a plain Discord incoming webhook (stateless HTTP
+POST), not a full bot client. No bot token, no gateway connection, no
+Server Members Intent -- and no always-on process requirement, since there's
+no persistent connection to keep alive between events.
 
-Needs the "Server Members Intent" toggle ON in the Discord Developer Portal
-(Bot page) -- without it, client.get_all_members() only ever sees the bot
-itself, and username resolution below silently fails for everyone else.
+Trade-off: a webhook can't look anyone up, so mentions need each person's
+real numeric Discord ID (Person.discord_id), not their username.
 """
 
-import logging
 import random
 
-import discord
+import httpx
 
 from src.config import settings
 
-logger = logging.getLogger(__name__)
-
-intents = discord.Intents.default()
-intents.members = True  # required to resolve a username to a mentionable member
-client = discord.Client(intents=intents)
-
-BOT_PERSONA = "🍫 น้องโกโก้"
+BOT_USERNAME = "🍫 น้องโกโก้"
 
 # One picked at random per assignment -- กวนๆ, never mean, matches the same
 # affectionate-teasing tone as the Sprint Wrapped page.
@@ -32,29 +27,21 @@ TEASING_LINES = [
 ]
 
 
-def _resolve_mention(discord_username: str) -> str:
-    member = discord.utils.get(client.get_all_members(), name=discord_username)
-    if member is None:
-        logger.warning(
-            "could not resolve discord_username=%s to a guild member -- "
-            "check Server Members Intent is on and the username is exact",
-            discord_username,
+async def _post(content: str) -> None:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            settings.DISCORD_WEBHOOK_URL,
+            json={"username": BOT_USERNAME, "content": content},
+            timeout=10,
         )
-        return f"@{discord_username}"  # visible fallback, just not a real ping
-    return member.mention
+        response.raise_for_status()
 
 
 async def announce_assignment(*, repo: str, pr_number: int, pr_title: str, pr_url: str,
-                               reviewer_discord_username: str, author_github_username: str) -> None:
-    channel = client.get_channel(settings.DISCORD_CHANNEL_ID)
-    if channel is None:
-        raise RuntimeError(f"channel {settings.DISCORD_CHANNEL_ID} not found/not cached yet")
-
-    mention = _resolve_mention(reviewer_discord_username)
+                               reviewer_discord_id: str, author_github_username: str) -> None:
     teasing = random.choice(TEASING_LINES)
-
-    await channel.send(
-        f"{BOT_PERSONA}: {mention} ถึงคิวรีวิวแล้วจ้า! {teasing}\n"
+    await _post(
+        f"<@{reviewer_discord_id}> ถึงคิวรีวิวแล้วจ้า! {teasing}\n"
         f"**{repo}#{pr_number}** — {pr_title}\n"
         f"เปิดโดย `{author_github_username}` — {pr_url}"
     )
@@ -65,10 +52,7 @@ async def announce_no_reviewer_available(*, repo: str, pr_number: int, pr_title:
     happen with a real 4-person roster on someone else's repo, but silently
     dropping the PR would be worse than saying so.
     """
-    channel = client.get_channel(settings.DISCORD_CHANNEL_ID)
-    if channel is None:
-        return
-    await channel.send(
-        f"{BOT_PERSONA}: **{repo}#{pr_number}** — {pr_title}\n"
+    await _post(
+        f"**{repo}#{pr_number}** — {pr_title}\n"
         f"⚠️ หาคนรีวิวให้ไม่ได้เลย (ทุกคนในทีมเป็นคนเปิด PR นี้พร้อมกันได้ไงเนี่ย 🤔)"
     )

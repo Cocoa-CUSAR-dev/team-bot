@@ -5,13 +5,18 @@ who's currently loaded down with reviews. Separate service, separate DB from
 the rest of the project on purpose — a bug or outage here should never touch
 the actual product.
 
+Posts through a plain Discord **incoming webhook**, not a full bot
+client/token — no gateway connection to keep alive, so there's no
+always-on-process requirement; a normal (even free-tier) web host is fine.
+
 ## How it works
 
 1. GitHub webhook (`pull_request: opened`) hits `POST /github/webhook`.
 2. The picker (`src/picker.py`) excludes the PR's author, finds whoever
    among the remaining 3 has the fewest currently-open review assignments,
    and picks randomly among anyone tied for that minimum.
-3. Posts in the configured Discord channel, tagging that person.
+3. Posts in the configured Discord channel via the webhook, as **น้องโกโก้**,
+   tagging that person (`<@discord_id>`) with one of a few random กวนๆ lines.
 4. On `pull_request: closed` (merged or not), their open assignment for
    that PR is marked resolved — their load drops back down.
 
@@ -22,17 +27,16 @@ raw counter permanently wrong the way it could with `count += 1` / `count -= 1`.
 ## First-time setup
 
 ```bash
-cp .env.sample .env   # fill in DATABASE_URL, DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, GITHUB_WEBHOOK_SECRET
+cp .env.sample .env   # fill in DATABASE_URL, DISCORD_WEBHOOK_URL, GITHUB_WEBHOOK_SECRET
 ```
 
-In the Discord Developer Portal, on the bot's page, turn on **Server
-Members Intent** — without it the bot can't resolve a Discord username to
-a real, pingable member.
-
 Copy `roster.local.json.example` to `roster.local.json` (gitignored, never
-committed — real teammates' usernames don't belong in tracked source) and
-fill in the real 4-person roster. No self-serve linking command for a team
-this size. Then run once:
+committed — real teammates' info doesn't belong in tracked source) and fill
+in the real 4-person roster. Each person's `discord_id` is their **numeric**
+Discord user ID (Developer Mode on in Discord settings → right-click them →
+Copy User ID) — not their username; a plain webhook has no way to look up a
+username, only a raw ID resolves to a real ping. No self-serve linking
+command for a team this size. Then run once:
 
 ```bash
 python -m src.seed

@@ -25,12 +25,11 @@ class Person(Base):
     person_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
-    # Discord's numeric snowflake ID is what a real <@ID> mention needs, but
-    # asking teammates to dig that up (Developer Mode -> right-click -> Copy
-    # User ID) is unnecessary friction for a 4-person roster. Store the
-    # Discord username instead -- discord_bot.py resolves it to a member
-    # (and a real mention) at send time via the guild's member list.
-    discord_username: Mapped[str] = mapped_column(String, unique=True)
+    # A real <@ID> mention needs the numeric snowflake ID, not the username --
+    # required now that posting goes through a plain incoming webhook
+    # (stateless, no member-list lookup available like a real bot client
+    # would have). Developer Mode -> right-click a person -> Copy User ID.
+    discord_id: Mapped[str] = mapped_column(String, unique=True)
     github_username: Mapped[str] = mapped_column(String, unique=True)
     display_name: Mapped[str] = mapped_column(String)
 

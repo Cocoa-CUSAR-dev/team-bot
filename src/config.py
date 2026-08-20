@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     # SQLAlchemy async needs the asyncpg driver in the URL scheme.
     DATABASE_URL: str
 
-    DISCORD_BOT_TOKEN: str
-    DISCORD_CHANNEL_ID: int  # where review-assignment messages get posted
+    # A plain Discord incoming webhook URL -- Settings > Integrations >
+    # Webhooks on the target channel. Treat this as a secret: whoever has it
+    # can post to that channel.
+    DISCORD_WEBHOOK_URL: str
 
     # Verifies incoming GitHub webhook payloads are actually from GitHub
     # (HMAC signature check) -- set the same value in each repo's webhook
