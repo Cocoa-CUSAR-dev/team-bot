@@ -26,6 +26,26 @@ TEASING_LINES = [
     "จับสลากได้คุณพอดีเป๊ะ เก่งจัง (ไม่ใช่คำชม)",
 ]
 
+# Praise on PR merge -- one picked at random, except Boom (Rirhcceez) gets
+# his own line by direct team request (2026-08-20 Discord thread).
+BOOM_GITHUB_USERNAME = "Rirhcceez"
+BOOM_PRAISE_LINE = "很棒呀～～ 哥哥。"
+
+PRAISE_LINES = [
+    "งานดีมาก รีวิวไวด้วย 👏",
+    "เก่งอ่ะ ตรวจละเอียดจริง",
+    "ผ่านฉลุย ขอบคุณที่ช่วยดูให้นะ",
+    "น้องโกโก้ปลื้มใจ รีวิวเสร็จไวปึ้ก",
+    "MVP ประจำรอบนี้ 🏆",
+]
+
+
+def choose_praise_line(reviewer_github_username: str, rng: random.Random | None = None) -> str:
+    if reviewer_github_username == BOOM_GITHUB_USERNAME:
+        return BOOM_PRAISE_LINE
+    rng = rng or random.Random()
+    return rng.choice(PRAISE_LINES)
+
 
 async def _post(content: str) -> None:
     async with httpx.AsyncClient() as client:
@@ -44,6 +64,23 @@ async def announce_assignment(*, repo: str, pr_number: int, pr_title: str, pr_ur
         f"<@{reviewer_discord_id}> ถึงคิวรีวิวแล้วจ้า! {teasing}\n"
         f"**{repo}#{pr_number}** — {pr_title}\n"
         f"เปิดโดย `{author_github_username}` — {pr_url}"
+    )
+
+
+async def announce_review_done(*, repo: str, pr_number: int, pr_title: str, pr_url: str,
+                                reviewer_display_name: str, reviewer_github_username: str,
+                                author_discord_id: str | None, author_github_username: str) -> None:
+    """Posted on PR merge -- pings the AUTHOR (not the reviewer) to let them
+    know their PR made it through review, and praises whoever reviewed it.
+    author_discord_id is None when the author isn't one of the 4 tracked
+    people (falls back to their GitHub username, not a broken mention).
+    """
+    praise = choose_praise_line(reviewer_github_username)
+    who = f"<@{author_discord_id}>" if author_discord_id else f"`{author_github_username}`"
+    await _post(
+        f"{who} รีวิวเสร็จแล้วจ้า! {praise}\n"
+        f"**{repo}#{pr_number}** — {pr_title}\n"
+        f"ตรวจโดย {reviewer_display_name} — {pr_url}"
     )
 
 

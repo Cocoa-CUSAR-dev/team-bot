@@ -20,6 +20,11 @@ async def _current_loads(session: AsyncSession) -> dict[str, int]:
     return {str(person_id): count for person_id, count in result.all()}
 
 
+async def get_person_by_github_username(session: AsyncSession, github_username: str) -> Person | None:
+    result = await session.execute(select(Person).where(Person.github_username == github_username))
+    return result.scalars().first()
+
+
 async def assign_reviewer(
     session: AsyncSession, *, repo: str, pr_number: int, author_github_username: str
 ) -> Person | None:
@@ -47,9 +52,11 @@ async def assign_reviewer(
     return next(p for p in people if str(p.person_id) == chosen.person_id)
 
 
-async def resolve_reviews(session: AsyncSession, *, repo: str, pr_number: int) -> None:
+async def resolve_reviews(session: AsyncSession, *, repo: str, pr_number: int) -> list[Person]:
     """Called on PR close (merged or not) -- closes any open assignment for
-    this PR. A PR usually has exactly one, but this doesn't assume it.
+    this PR and returns who those assignments belonged to (so the caller can
+    post a "thanks for reviewing" message -- see github_webhook.py). A PR
+    usually has exactly one open assignment, but this doesn't assume it.
     """
     open_assignments = (
         (
@@ -64,6 +71,17 @@ async def resolve_reviews(session: AsyncSession, *, repo: str, pr_number: int) -
         .scalars()
         .all()
     )
+    if not open_assignments:
+        return []
+
+    assignee_ids = [a.assignee_id for a in open_assignments]
     for a in open_assignments:
         a.resolved_at = func.now()
     await session.commit()
+
+    people = (
+        (await session.execute(select(Person).where(Person.person_id.in_(assignee_ids))))
+        .scalars()
+        .all()
+    )
+    return list(people)

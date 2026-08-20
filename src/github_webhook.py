@@ -13,8 +13,12 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from src.config import settings
 from src.database import async_session_maker
-from src.discord_notify import announce_assignment, announce_no_reviewer_available
-from src.reviews import assign_reviewer, resolve_reviews
+from src.discord_notify import (
+    announce_assignment,
+    announce_no_reviewer_available,
+    announce_review_done,
+)
+from src.reviews import assign_reviewer, get_person_by_github_username, resolve_reviews
 
 router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
@@ -70,7 +74,25 @@ async def webhook(
                 author_github_username=pr["user"]["login"],
             )
     elif action == "closed":
+        author_github_username = pr["user"]["login"]
         async with async_session_maker() as session:
-            await resolve_reviews(session, repo=repo, pr_number=pr_number)
+            resolved_reviewers = await resolve_reviews(session, repo=repo, pr_number=pr_number)
+            author = await get_person_by_github_username(session, author_github_username)
+
+        # Praise only fires on an actual merge -- a closed-without-merging
+        # PR didn't really get "reviewed through", so celebrating it would
+        # be a lie. resolved_reviewers is usually exactly one person.
+        if pr.get("merged") and resolved_reviewers:
+            for reviewer in resolved_reviewers:
+                await announce_review_done(
+                    repo=repo,
+                    pr_number=pr_number,
+                    pr_title=pr["title"],
+                    pr_url=pr["html_url"],
+                    reviewer_display_name=reviewer.display_name,
+                    reviewer_github_username=reviewer.github_username,
+                    author_discord_id=author.discord_id if author else None,
+                    author_github_username=author_github_username,
+                )
 
     return {"status": "ok"}
