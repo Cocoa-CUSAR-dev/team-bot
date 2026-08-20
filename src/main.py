@@ -1,3 +1,5 @@
+import os
+
 import uvicorn
 from fastapi import FastAPI
 
@@ -14,4 +16,11 @@ async def health() -> dict[str, str]:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=settings.WEBHOOK_PORT)
+    # Render assigns its own port via the PORT env var and health-checks
+    # exactly that port -- ignoring it and binding to a fixed port instead
+    # is why a deploy can build fine, start fine, and still hang "in
+    # progress" forever (Render's port scanner never finds it listening
+    # where expected). PORT takes priority when Render sets it; WEBHOOK_PORT
+    # is just the local-dev fallback.
+    port = int(os.environ.get("PORT", settings.WEBHOOK_PORT))
+    uvicorn.run(app, host="0.0.0.0", port=port)
