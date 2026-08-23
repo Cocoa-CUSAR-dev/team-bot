@@ -25,11 +25,27 @@ async def get_person_by_github_username(session: AsyncSession, github_username: 
     return result.scalars().first()
 
 
+async def _last_assigned_github_username(session: AsyncSession) -> str | None:
+    """Whoever got the most recent assignment, globally (any repo, resolved
+    or not) -- used to break ties away from an immediate repeat. Not scoped
+    to one repo: the point is spreading load across the whole team, not per
+    repo.
+    """
+    result = await session.execute(
+        select(Person.github_username)
+        .join(ReviewAssignment, ReviewAssignment.assignee_id == Person.person_id)
+        .order_by(ReviewAssignment.assigned_at.desc())
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
 async def assign_reviewer(
     session: AsyncSession, *, repo: str, pr_number: int, author_github_username: str
 ) -> Person | None:
     people = (await session.execute(select(Person))).scalars().all()
     loads = await _current_loads(session)
+    last_assigned = await _last_assigned_github_username(session)
 
     candidates = [
         Candidate(
@@ -40,7 +56,11 @@ async def assign_reviewer(
         for p in people
     ]
 
-    chosen = pick_reviewer(candidates=candidates, author_github_username=author_github_username)
+    chosen = pick_reviewer(
+        candidates=candidates,
+        author_github_username=author_github_username,
+        last_assigned_github_username=last_assigned,
+    )
     if chosen is None:
         return None
 
