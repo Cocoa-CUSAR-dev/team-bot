@@ -8,10 +8,12 @@ real numeric Discord ID (Person.discord_id), not their username.
 """
 
 import random
+from collections.abc import Sequence
 
 import httpx
 
 from src.config import settings
+from src.reviews import OpenReview
 
 BOT_USERNAME = "🍫 น้องโกโก้"
 
@@ -93,3 +95,25 @@ async def announce_no_reviewer_available(*, repo: str, pr_number: int, pr_title:
         f"**{repo}#{pr_number}** — {pr_title}\n"
         f"⚠️ หาคนรีวิวให้ไม่ได้เลย (ทุกคนในทีมเป็นคนเปิด PR นี้พร้อมกันได้ไงเนี่ย 🤔)"
     )
+
+
+def format_daily_reminder(open_reviews: Sequence[OpenReview]) -> str | None:
+    """None means "nothing to post" -- the scheduler skips sending anything
+    rather than spamming an empty "all clear" message every single evening.
+    """
+    if not open_reviews:
+        return None
+
+    lines = [
+        f"<@{r.discord_id}> — **{r.repo}#{r.pr_number}** — {r.pr_title or '(ไม่มีชื่อ)'} — {r.pr_url or ''}"
+        for r in open_reviews
+    ]
+    return (
+        "⏰ เตือนรีวิวประจำวันจ้า ตอนนี้ยังค้างอยู่ทั้งหมดนี้:\n" + "\n".join(lines)
+    )
+
+
+async def announce_daily_reminder(open_reviews: Sequence[OpenReview]) -> None:
+    content = format_daily_reminder(open_reviews)
+    if content is not None:
+        await _post(content)

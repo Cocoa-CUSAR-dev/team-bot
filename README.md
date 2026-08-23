@@ -19,6 +19,15 @@ always-on-process requirement; a normal (even free-tier) web host is fine.
    tagging that person (`<@discord_id>`) with one of a few random กวนๆ lines.
 4. On `pull_request: closed` (merged or not), their open assignment for
    that PR is marked resolved — their load drops back down.
+5. If there's a genuine tie for fewest-loaded, whoever was *just* assigned
+   (globally, any repo) is skipped unless they're the only person left in
+   the tie — so a real coin-flip repeat doesn't feel like a bias, without
+   changing the "PRs > people forces a repeat" case, which is correct.
+6. Every evening at 19:00 Asia/Bangkok, a GitHub Actions cron (in this repo,
+   `.github/workflows/daily-reminder.yml`) hits `POST /internal/daily-reminder`,
+   which posts one message listing every still-open review, tagging each
+   person. Runs on a schedule *outside* review-bot itself on purpose (see
+   below) rather than an in-process scheduler.
 
 Load is derived from an event log (`review_assignment`, open/resolved rows),
 not a mutable counter — a missed or duplicated webhook event can't leave a
@@ -52,6 +61,18 @@ Point each of the 6 repos' Settings → Webhooks (or one org-level webhook, if
 that's set up) at this service's `/github/webhook` URL, content type
 `application/json`, "Pull requests" event only, secret matching
 `GITHUB_WEBHOOK_SECRET`.
+
+### Daily reminder setup
+
+This repo's GitHub Actions secrets (Settings → Secrets and variables →
+Actions) need:
+- `REVIEW_BOT_URL` — the deployed base URL (e.g. `https://team-bot-vszf.onrender.com`)
+- `REVIEW_BOT_INTERNAL_SECRET` — same value as `INTERNAL_TRIGGER_SECRET` in the deployed env
+
+Render's free tier spins down when idle — the first cron hit of the day
+pays a ~50s cold-start, which is fine for a once-a-day job. Test it anytime
+without waiting for 19:00 via the workflow's "Run workflow" button
+(`workflow_dispatch`) on the Actions tab.
 
 ## Not handled (by design, out of scope for this bot)
 

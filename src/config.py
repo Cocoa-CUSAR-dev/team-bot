@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     # config (Settings > Webhooks > Secret).
     GITHUB_WEBHOOK_SECRET: str
 
+    # Guards POST /internal/daily-reminder -- a plain shared-secret header,
+    # not GitHub's HMAC scheme, since the caller here is a GitHub Actions
+    # cron we control, not GitHub's own webhook delivery.
+    INTERNAL_TRIGGER_SECRET: str
+
     WEBHOOK_PORT: int = 8090
 
 

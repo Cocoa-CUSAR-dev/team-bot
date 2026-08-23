@@ -1,0 +1,21 @@
+# Triggers the daily "PRs still awaiting review" reminder. Runs here (not
+# an in-process scheduler inside review-bot itself) on purpose -- review-bot
+# stays a plain stateless webhook receiver with no always-on requirement,
+# so it can sit on Render's free tier. GitHub Actions cron is UTC-only, so
+# 19:00 Asia/Bangkok (UTC+7, no DST) is 12:00 UTC.
+
+name: Daily review reminder
+
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call review-bot's daily reminder endpoint
+        run: |
+          curl -sf -X POST "${{ secrets.REVIEW_BOT_URL }}/internal/daily-reminder" \
+            -H "X-Internal-Secret: ${{ secrets.REVIEW_BOT_INTERNAL_SECRET }}"

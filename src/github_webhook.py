@@ -61,6 +61,8 @@ async def webhook(
                 repo=repo,
                 pr_number=pr_number,
                 author_github_username=pr["user"]["login"],
+                pr_title=pr["title"],
+                pr_url=pr["html_url"],
             )
         if reviewer is None:
             await announce_no_reviewer_available(repo=repo, pr_number=pr_number, pr_title=pr["title"])

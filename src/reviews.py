@@ -3,11 +3,22 @@ pure picker, persists the result. Deliberately separate from picker.py so
 the selection rule itself needs no DB/mocking to test.
 """
 
+from dataclasses import dataclass
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Person, ReviewAssignment
 from src.picker import Candidate, pick_reviewer
+
+
+@dataclass(frozen=True)
+class OpenReview:
+    repo: str
+    pr_number: int
+    pr_title: str | None
+    pr_url: str | None
+    discord_id: str
 
 
 async def _current_loads(session: AsyncSession) -> dict[str, int]:
@@ -41,7 +52,13 @@ async def _last_assigned_github_username(session: AsyncSession) -> str | None:
 
 
 async def assign_reviewer(
-    session: AsyncSession, *, repo: str, pr_number: int, author_github_username: str
+    session: AsyncSession,
+    *,
+    repo: str,
+    pr_number: int,
+    author_github_username: str,
+    pr_title: str | None = None,
+    pr_url: str | None = None,
 ) -> Person | None:
     people = (await session.execute(select(Person))).scalars().all()
     loads = await _current_loads(session)
@@ -65,7 +82,13 @@ async def assign_reviewer(
         return None
 
     session.add(
-        ReviewAssignment(repo=repo, pr_number=pr_number, assignee_id=chosen.person_id)
+        ReviewAssignment(
+            repo=repo,
+            pr_number=pr_number,
+            assignee_id=chosen.person_id,
+            pr_title=pr_title,
+            pr_url=pr_url,
+        )
     )
     await session.commit()
 
@@ -105,3 +128,25 @@ async def resolve_reviews(session: AsyncSession, *, repo: str, pr_number: int) -
         .all()
     )
     return list(people)
+
+
+async def get_open_reviews(session: AsyncSession) -> list[OpenReview]:
+    """Everything still unresolved, oldest first -- feeds the daily reminder
+    job (see scheduler.py).
+    """
+    rows = await session.execute(
+        select(ReviewAssignment, Person)
+        .join(Person, Person.person_id == ReviewAssignment.assignee_id)
+        .where(ReviewAssignment.resolved_at.is_(None))
+        .order_by(ReviewAssignment.assigned_at.asc())
+    )
+    return [
+        OpenReview(
+            repo=ra.repo,
+            pr_number=ra.pr_number,
+            pr_title=ra.pr_title,
+            pr_url=ra.pr_url,
+            discord_id=person.discord_id,
+        )
+        for ra, person in rows.all()
+    ]
