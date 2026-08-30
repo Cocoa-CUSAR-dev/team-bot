@@ -1,4 +1,4 @@
-from src.discord_notify import format_daily_reminder
+from src.discord_notify import ALL_CLEAR_LINES, format_daily_reminder
 from src.reviews import OpenReview
 
 
@@ -9,8 +9,9 @@ def _review(**overrides) -> OpenReview:
     return OpenReview(**{**defaults, **overrides})
 
 
-def test_returns_none_when_nothing_is_open() -> None:
-    assert format_daily_reminder([]) is None
+def test_congratulates_instead_of_going_silent_when_nothing_is_open() -> None:
+    """An empty queue is good news -- it still gets posted, not skipped."""
+    assert format_daily_reminder([]) in ALL_CLEAR_LINES
 
 
 def test_lists_every_open_review_with_a_real_mention() -> None:

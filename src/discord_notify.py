@@ -97,12 +97,27 @@ async def announce_no_reviewer_available(*, repo: str, pr_number: int, pr_title:
     )
 
 
-def format_daily_reminder(open_reviews: Sequence[OpenReview]) -> str | None:
-    """None means "nothing to post" -- the scheduler skips sending anything
-    rather than spamming an empty "all clear" message every single evening.
+# Posted instead of the reminder on a day with zero open reviews -- one
+# picked at random, same "never mean" affectionate tone as the other line
+# banks. A quiet team deserves a shout-out, not silence.
+ALL_CLEAR_LINES = [
+    "วันนี้ไม่มี PR ค้างรีวิวเลยจ้า! เก่งกันมากทุกคน 🎉",
+    "รีวิวหมดคิวแล้ว ว่างเผื่อไปกินช็อกโกแลตฉลองได้เลย 🍫",
+    "กระดานสะอาดจ้า ไม่มีใครติดหนี้รีวิวใครเลยวันนี้ 👏",
+    "ทุก PR ผ่านการรีวิวหมดแล้ว ทีมนี้ไวจริง ๆ นะ 😌",
+]
+
+
+def format_daily_reminder(
+    open_reviews: Sequence[OpenReview], rng: random.Random | None = None
+) -> str:
+    """Always returns something to post -- an empty queue is good news, not
+    nothing to say, so it gets its own (randomly picked) congratulatory line
+    instead of the scheduler silently skipping the day.
     """
     if not open_reviews:
-        return None
+        rng = rng or random.Random()
+        return rng.choice(ALL_CLEAR_LINES)
 
     lines = [
         f"<@{r.discord_id}> — **{r.repo}#{r.pr_number}** — {r.pr_title or '(ไม่มีชื่อ)'} — {r.pr_url or ''}"
@@ -114,6 +129,4 @@ def format_daily_reminder(open_reviews: Sequence[OpenReview]) -> str | None:
 
 
 async def announce_daily_reminder(open_reviews: Sequence[OpenReview]) -> None:
-    content = format_daily_reminder(open_reviews)
-    if content is not None:
-        await _post(content)
+    await _post(format_daily_reminder(open_reviews))
