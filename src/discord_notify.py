@@ -7,6 +7,7 @@ Trade-off: a webhook can't look anyone up, so mentions need each person's
 real numeric Discord ID (Person.discord_id), not their username.
 """
 
+import asyncio
 import random
 from collections.abc import Sequence
 
@@ -50,13 +51,47 @@ def choose_praise_line(reviewer_github_username: str, rng: random.Random | None 
 
 
 async def _post(content: str) -> None:
+    # Discord rate-limits a single incoming webhook fairly aggressively, and
+    # two PRs opened moments apart (e.g. a migration + the code that reads
+    # it) both hit this within the same request-handling window often
+    # enough to trip it for real -- confirmed 2026-09-01 on database#32 /
+    # chatbot#46. A 429 carries exactly how long to wait, so one retry
+    # after that (rather than giving up, or blindly retrying forever) is
+    # enough to ride out a same-second double-post.
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            settings.DISCORD_WEBHOOK_URL,
-            json={"username": BOT_USERNAME, "content": content},
-            timeout=10,
-        )
-        response.raise_for_status()
+        for attempt in range(2):
+            response = await client.post(
+                settings.DISCORD_WEBHOOK_URL,
+                json={"username": BOT_USERNAME, "content": content},
+                timeout=10,
+            )
+            if response.status_code == 429 and attempt == 0:
+                retry_after = _rate_limit_wait_seconds(response)
+                await asyncio.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            return
+
+
+def _rate_limit_wait_seconds(response: httpx.Response) -> float:
+    """Discord sends the wait time both as a `Retry-After` header (seconds)
+    and in the JSON body's `retry_after` field -- prefer the header since it
+    doesn't require the body to actually be valid JSON, fall back to the
+    body, and fall back to a conservative 1s if somehow neither is present.
+    """
+    header_value = response.headers.get("Retry-After")
+    if header_value is not None:
+        try:
+            return float(header_value)
+        except ValueError:
+            pass
+    try:
+        return float(response.json().get("retry_after", 1))
+    except (ValueError, TypeError, AttributeError):
+        # ValueError covers both invalid JSON (json.JSONDecodeError is a
+        # subclass) and a non-numeric retry_after; AttributeError covers a
+        # valid-but-non-object JSON body (e.g. a bare array) with no .get().
+        return 1.0
 
 
 async def announce_assignment(*, repo: str, pr_number: int, pr_title: str, pr_url: str,

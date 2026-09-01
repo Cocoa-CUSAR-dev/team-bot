@@ -64,16 +64,31 @@ async def webhook(
                 pr_title=pr["title"],
                 pr_url=pr["html_url"],
             )
-        if reviewer is None:
-            await announce_no_reviewer_available(repo=repo, pr_number=pr_number, pr_title=pr["title"])
-        else:
-            await announce_assignment(
-                repo=repo,
-                pr_number=pr_number,
-                pr_title=pr["title"],
-                pr_url=pr["html_url"],
-                reviewer_discord_id=reviewer.discord_id,
-                author_github_username=pr["user"]["login"],
+        # The DB write above is already committed at this point -- it's the
+        # source of truth (see models.py), Discord is just an announcement.
+        # A post failure here (rate limit outlasting _post's one retry, a
+        # Discord outage, whatever) must never 500 this response: GitHub
+        # retries a failed delivery, which would re-run assign_reviewer
+        # above and double-assign the same PR. Log and move on instead --
+        # the assignment already happened even if nobody got pinged.
+        try:
+            if reviewer is None:
+                await announce_no_reviewer_available(repo=repo, pr_number=pr_number, pr_title=pr["title"])
+            else:
+                await announce_assignment(
+                    repo=repo,
+                    pr_number=pr_number,
+                    pr_title=pr["title"],
+                    pr_url=pr["html_url"],
+                    reviewer_discord_id=reviewer.discord_id,
+                    author_github_username=pr["user"]["login"],
+                )
+        except Exception:
+            logger.exception(
+                "assignment announcement failed to post to Discord for %s#%s "
+                "(assignment itself was still recorded)",
+                repo,
+                pr_number,
             )
     elif action == "closed":
         author_github_username = pr["user"]["login"]
@@ -86,15 +101,25 @@ async def webhook(
         # be a lie. resolved_reviewers is usually exactly one person.
         if pr.get("merged") and resolved_reviewers:
             for reviewer in resolved_reviewers:
-                await announce_review_done(
-                    repo=repo,
-                    pr_number=pr_number,
-                    pr_title=pr["title"],
-                    pr_url=pr["html_url"],
-                    reviewer_display_name=reviewer.display_name,
-                    reviewer_github_username=reviewer.github_username,
-                    author_discord_id=author.discord_id if author else None,
-                    author_github_username=author_github_username,
-                )
+                # Same reasoning as the "opened" branch above: resolve_reviews
+                # already committed (marked resolved_at) -- a Discord hiccup
+                # here must not turn into a 500 and a duplicate resolve retry.
+                try:
+                    await announce_review_done(
+                        repo=repo,
+                        pr_number=pr_number,
+                        pr_title=pr["title"],
+                        pr_url=pr["html_url"],
+                        reviewer_display_name=reviewer.display_name,
+                        reviewer_github_username=reviewer.github_username,
+                        author_discord_id=author.discord_id if author else None,
+                        author_github_username=author_github_username,
+                    )
+                except Exception:
+                    logger.exception(
+                        "review-done announcement failed to post to Discord for %s#%s",
+                        repo,
+                        pr_number,
+                    )
 
     return {"status": "ok"}
