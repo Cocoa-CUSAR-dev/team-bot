@@ -10,7 +10,8 @@ from fastapi import APIRouter, Header, HTTPException, status
 
 from src.config import settings
 from src.database import async_session_maker
-from src.discord_notify import announce_daily_reminder
+from src.discord_notify import announce_daily_reminder, announce_env_drift
+from src.env_drift import check_env_drift
 from src.reviews import get_open_reviews
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -30,3 +31,15 @@ async def daily_reminder(x_internal_secret: str | None = Header(default=None)) -
     await announce_daily_reminder(open_reviews)
 
     return {"status": "ok", "open_count": str(len(open_reviews))}
+
+
+@router.post("/env-drift-check", status_code=200)
+async def env_drift_check(x_internal_secret: str | None = Header(default=None)) -> dict[str, str]:
+    _verify_secret(x_internal_secret)
+
+    async with async_session_maker() as session:
+        events = await check_env_drift(session)
+    await announce_env_drift(events)
+
+    changed = sum(1 for e in events if not e.is_new)
+    return {"status": "ok", "files_checked": str(len(events)), "changed": str(changed)}

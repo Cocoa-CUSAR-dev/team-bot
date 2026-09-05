@@ -1,0 +1,21 @@
+# Triggers the daily "did anyone change an env var list" check. Same
+# stateless-webhook-receiver reasoning as daily-reminder.yml -- the actual
+# diffing runs in review-bot's own /internal/env-drift-check handler, this
+# workflow just wakes it up on a schedule. 08:00 Asia/Bangkok (UTC+7, no
+# DST) is 01:00 UTC.
+
+name: Daily env drift check
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call review-bot's env drift check endpoint
+        run: |
+          curl -sf -X POST "${{ secrets.REVIEW_BOT_URL }}/internal/env-drift-check" \
+            -H "X-Internal-Secret: ${{ secrets.REVIEW_BOT_INTERNAL_SECRET }}"

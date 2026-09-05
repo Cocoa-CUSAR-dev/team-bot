@@ -14,6 +14,7 @@ from collections.abc import Sequence
 import httpx
 
 from src.config import settings
+from src.env_drift import DriftEvent
 from src.reviews import OpenReview
 
 BOT_USERNAME = "🍫 น้องโกโก้"
@@ -152,3 +153,28 @@ async def announce_daily_reminder(open_reviews: Sequence[OpenReview]) -> None:
     content = format_daily_reminder(open_reviews)
     if content is not None:
         await _post(content)
+
+
+async def announce_env_drift(events: Sequence[DriftEvent]) -> None:
+    """Posted only when something actually changed -- unlike an empty review
+    queue, an unchanged env file is just the normal daily state, not a
+    special occasion, so staying quiet on a no-drift day is the right call
+    (the opposite tradeoff from announce_daily_reminder above).
+
+    `is_new` events (a watched file's very first check, nothing to diff
+    against yet) are silently skipped too -- day one of watching a file
+    isn't a change, it's a baseline.
+    """
+    changed = [e for e in events if not e.is_new]
+    if not changed:
+        return
+
+    lines = [
+        f"**{e.repo}/{e.path}** (`{e.ref}`) — "
+        f"https://github.com/Cocoa-CUSAR-dev/{e.repo}/commits/{e.ref}/{e.path}"
+        for e in changed
+    ]
+    await _post(
+        "🔎 เอ๊ะ มีคนแก้ env var list ตั้งแต่เช็กครั้งก่อนนะ ไปดูหน่อยว่าใครแก้อะไร:\n"
+        + "\n".join(lines)
+    )

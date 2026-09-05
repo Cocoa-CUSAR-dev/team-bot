@@ -34,6 +34,25 @@ class Person(Base):
     display_name: Mapped[str] = mapped_column(String)
 
 
+class EnvSnapshot(Base):
+    """Last-known SHA-256 of one watched env-declaration file (a repo's
+    .env.sample or render.yaml -- never a real .env, those aren't in git).
+    One row per (repo, path); checked daily, see env_drift.py. A changed
+    hash means someone edited that file since the last check -- doesn't
+    (can't) see secret values changed only in Render/GitHub's dashboard,
+    since those never touch a git-tracked file at all.
+    """
+
+    __tablename__ = "env_snapshot"
+
+    repo: Mapped[str] = mapped_column(String, primary_key=True)
+    path: Mapped[str] = mapped_column(String, primary_key=True)
+    sha256: Mapped[str] = mapped_column(String)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ReviewAssignment(Base):
     __tablename__ = "review_assignment"
 
