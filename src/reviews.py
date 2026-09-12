@@ -4,6 +4,7 @@ the selection rule itself needs no DB/mocking to test.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ class OpenReview:
     pr_title: str | None
     pr_url: str | None
     discord_id: str
+    assigned_at: datetime
 
 
 async def _current_loads(session: AsyncSession) -> dict[str, int]:
@@ -147,6 +149,7 @@ async def get_open_reviews(session: AsyncSession) -> list[OpenReview]:
             pr_title=ra.pr_title,
             pr_url=ra.pr_url,
             discord_id=person.discord_id,
+            assigned_at=ra.assigned_at,
         )
         for ra, person in rows.all()
     ]

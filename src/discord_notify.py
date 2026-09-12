@@ -10,6 +10,7 @@ real numeric Discord ID (Person.discord_id), not their username.
 import asyncio
 import random
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -40,6 +41,24 @@ PRAISE_LINES = [
     "ผ่านฉลุย ขอบคุณที่ช่วยดูให้นะ",
     "น้องโกโก้ปลื้มใจ รีวิวเสร็จไวปึ้ก",
     "MVP ประจำรอบนี้ 🏆",
+]
+
+# A review still open past this on the daily reminder gets the dragon
+# treatment below instead of a plain line -- by request: "a dragon that
+# gets down and rawrrr fire" at anything stuck more than 2 days.
+DRAGON_AFTER = timedelta(days=2)
+
+# Same "กวนๆ, never mean" house rule as TEASING_LINES -- loud and silly,
+# never actually angry at anyone. Fire emoji by explicit request (turned up
+# twice: "many fire emoji with funny words", then "more fire").
+DRAGON_LINES = [
+    "🔥🐉🔥 มังกรโบราณตื่นจากนิทรา ทะยานสู่นภากาศ เปล่งเสียงคำรามสะท้านทั่วสารทิศ RAWRRR!! 🔥🔥🔥🔥",
+    "🐉🔥 ในชั่วพริบตา ลมปราณเพลิงพวยพุ่งจากปากมังกร มุ่งเผาผลาญ PR ที่ค้างคาให้มอดไหม้เป็นจุณ 🔥🔥🔥🔥🔥",
+    "🔥🔥🐉 ทั่วปฐพีสั่นสะเทือน เมื่อมังกรผู้พิโรธปรากฏกาย เหตุเพราะ PR นี้ถูกทอดทิ้งนานเกินไปแล้ว 🔥🔥🔥",
+    "🐉🔥 กฎแห่งสวรรค์ได้ตัดสินแล้ว ผู้ใดปล่อย PR ค้างเกิน 2 วัน จักต้องเผชิญเปลวมังกร RAWRRRR 🔥🔥🔥🔥🔥",
+    "🔥🐉🔥 เสียงคำรามดังกึกก้อง ราวกับฟ้าถล่มดินทลาย นั่นคือลางบอกเหตุว่ามังกรมาเยือนแล้ว 🔥🔥🔥🔥",
+    "🐉🔥🔥 ตำนานเล่าขานไว้ว่า ผู้ใดถูกมังกรจับจ้องมอง วันนั้นคือวันที่ PR ของเขาจะมอดไหม้เป็นเถ้าถ่าน RAWRRR 🔥🔥🔥",
+    "🔥🔥🐉 ท้องนภาแปรเปลี่ยนเป็นสีเลือด นั่นคือสัญญาณแห่งพิโรธของเจ้ามังกรผู้เฝ้ารอการรีวิว 🔥🔥🔥🔥🔥",
 ]
 
 
@@ -132,17 +151,34 @@ async def announce_no_reviewer_available(*, repo: str, pr_number: int, pr_title:
     )
 
 
-def format_daily_reminder(open_reviews: Sequence[OpenReview]) -> str | None:
+def format_daily_reminder(
+    open_reviews: Sequence[OpenReview],
+    *,
+    now: datetime | None = None,
+    rng: random.Random | None = None,
+) -> str | None:
     """None means "nothing to post" -- the scheduler skips sending anything
     rather than spamming an empty "all clear" message every single evening.
+
+    A review still open more than DRAGON_AFTER gets a dragon-fire line
+    added on top of the normal one -- `now`/`rng` are injectable so tests
+    don't depend on the real clock or actually-random line choice.
     """
     if not open_reviews:
         return None
 
-    lines = [
-        f"<@{r.discord_id}> — **{r.repo}#{r.pr_number}** — {r.pr_title or '(ไม่มีชื่อ)'} — {r.pr_url or ''}"
-        for r in open_reviews
-    ]
+    now = now or datetime.now(UTC)
+    rng = rng or random.Random()
+
+    lines = []
+    for r in open_reviews:
+        base = f"<@{r.discord_id}> — **{r.repo}#{r.pr_number}** — {r.pr_title or '(ไม่มีชื่อ)'} — {r.pr_url or ''}"
+        age = now - r.assigned_at
+        if age > DRAGON_AFTER:
+            lines.append(f"{rng.choice(DRAGON_LINES)} (ค้างมา {age.days} วันแล้ว)\n{base}")
+        else:
+            lines.append(base)
+
     return (
         "⏰ เตือนรีวิวประจำวันจ้า ตอนนี้ยังค้างอยู่ทั้งหมดนี้:\n" + "\n".join(lines)
     )
