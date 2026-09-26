@@ -132,14 +132,30 @@ async def resolve_reviews(session: AsyncSession, *, repo: str, pr_number: int) -
     return list(people)
 
 
-async def get_open_reviews(session: AsyncSession) -> list[OpenReview]:
+async def get_person_by_discord_id(session: AsyncSession, discord_id: str) -> Person | None:
+    result = await session.execute(select(Person).where(Person.discord_id == discord_id))
+    return result.scalars().first()
+
+
+async def get_open_reviews(
+    session: AsyncSession, *, discord_id: str | None = None
+) -> list[OpenReview]:
     """Everything still unresolved, oldest first -- feeds the daily reminder
-    job (see scheduler.py).
+    job (see internal.py).
+
+    `discord_id` narrows it to one person, for /myreviews. Kept as a filter
+    on the existing query rather than a second near-identical function, so
+    the daily reminder and the slash command can't drift apart on what
+    "still open" means.
     """
+    conditions = [ReviewAssignment.resolved_at.is_(None)]
+    if discord_id is not None:
+        conditions.append(Person.discord_id == discord_id)
+
     rows = await session.execute(
         select(ReviewAssignment, Person)
         .join(Person, Person.person_id == ReviewAssignment.assignee_id)
-        .where(ReviewAssignment.resolved_at.is_(None))
+        .where(*conditions)
         .order_by(ReviewAssignment.assigned_at.asc())
     )
     return [

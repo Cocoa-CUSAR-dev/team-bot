@@ -4,12 +4,14 @@ import uvicorn
 from fastapi import FastAPI
 
 from src.config import settings
+from src.discord_interactions import router as discord_router
 from src.github_webhook import router as github_router
 from src.internal import router as internal_router
 
 app = FastAPI(title="review-bot")
 app.include_router(github_router)
 app.include_router(internal_router)
+app.include_router(discord_router)
 
 
 @app.get("/health")

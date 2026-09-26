@@ -188,3 +188,49 @@ async def announce_daily_reminder(open_reviews: Sequence[OpenReview]) -> None:
     content = format_daily_reminder(open_reviews)
     if content is not None:
         await _post(content)
+
+
+# Returned by /myreviews to somebody who isn't one of the seeded 4 -- a
+# guest, or a teammate added to Discord but not yet to roster.local.json.
+# Saying so beats an empty list, which reads as "you have no reviews" and
+# is a different (wrong) statement.
+NOT_IN_ROSTER = (
+    "ยังไม่มีชื่อในระบบรีวิวเลยจ้า 🤔 (ยังไม่ได้ seed ลง roster) "
+    "บอกทีมให้เพิ่มให้ก่อนนะ"
+)
+
+ALL_CLEAR_MY_REVIEWS = "ตอนนี้ไม่มี PR ค้างรีวิวเลยจ้า ว่างงง ✨"
+
+
+def format_my_reviews(
+    open_reviews: Sequence[OpenReview],
+    *,
+    discord_id: str,
+    in_roster: bool = True,
+    now: datetime | None = None,
+) -> str:
+    """The /myreviews reply. Mentions the asker so the message still reads
+    correctly in-channel (it's posted publicly, not ephemerally).
+
+    Reuses DRAGON_AFTER so an item that's on fire here is on fire in the
+    daily reminder too -- one definition of "overdue", not two.
+    """
+    who = f"<@{discord_id}>"
+    if not in_roster:
+        return f"{who} {NOT_IN_ROSTER}"
+    if not open_reviews:
+        return f"{who} {ALL_CLEAR_MY_REVIEWS}"
+
+    now = now or datetime.now(UTC)
+    lines = []
+    for r in open_reviews:
+        age = now - r.assigned_at
+        flame = "🔥 " if age > DRAGON_AFTER else ""
+        title = r.pr_title or "(ไม่มีชื่อ)"
+        lines.append(
+            f"{flame}**{r.repo}#{r.pr_number}** — {title} — {r.pr_url or ''} "
+            f"(ค้างมา {age.days} วัน)"
+        )
+
+    count = len(open_reviews)
+    return f"{who} ตอนนี้ถือรีวิวอยู่ {count} รายการจ้า:\n" + "\n".join(lines)
