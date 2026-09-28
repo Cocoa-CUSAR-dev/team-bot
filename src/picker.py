@@ -3,7 +3,8 @@ so it's trivially unit-testable. Callers fetch current load and hand it in.
 
 Rules:
   1. Never the PR's own author.
-  2. Always draw from whoever currently has the fewest open reviews.
+  2. Always draw from whoever currently carries the fewest review points
+     (see reviews.group_load_points -- a task's follow-on PRs count half).
   3. Within a tie, prefer not repeating whoever was *just* assigned
      (globally, not per-repo) -- unless they're the only person left in
      the tie, in which case repeating them is correct, not a bug: with
@@ -25,7 +26,10 @@ from dataclasses import dataclass
 class Candidate:
     person_id: str
     github_username: str
-    open_review_count: int
+    # Points, not a PR count -- follow-on PRs of one task are half-price. See
+    # reviews.group_load_points. Floats compare and tie fine here: the values
+    # are sums of 0.5s, so equal loads really are exactly equal.
+    open_review_count: float
 
 
 def pick_reviewer(

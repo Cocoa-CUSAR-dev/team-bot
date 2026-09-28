@@ -6,7 +6,7 @@ the selection rule itself needs no DB/mocking to test.
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import String, cast, distinct, func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.grouping import extract_group_key
@@ -48,32 +48,54 @@ class OpenReview:
     assigned_at: datetime
 
 
-async def _current_loads(session: AsyncSession) -> dict[str, int]:
-    """person_id -> current review load.
+# A task's first PR costs a full point; every further PR of the SAME task
+# costs half. So 5 PRs of one task = 1 + 4*0.5 = 3 points, not 5 and not 1.
+#
+# Both extremes were worse. At 5 points the holder gets ignored for days and
+# then, when the whole batch merges at once, drops to 0 and catches the next
+# several PRs in a row -- a bigger swing than the one being fixed. At 1 point
+# a 5-PR task and a single PR look identical to the picker, so the person
+# already reading five diffs keeps getting handed more.
+FOLLOW_ON_PR_WEIGHT = 0.5
 
-    One TASK counts once, not one PR. A grouped task can be 5 PRs across 5
-    repos (the "Web UI notification" batch of 2026-09-28 was exactly that),
-    and counting them linearly would make whoever took it look 5x loaded and
-    starve them of everything else for days -- which would punish exactly the
-    behaviour grouping exists to encourage. Un-keyed PRs still count one
-    apiece, via assignment_id standing in for a group of one.
+
+def group_load_points(pr_count: int) -> float:
+    """Points one task's open PRs cost their reviewer. See FOLLOW_ON_PR_WEIGHT."""
+    if pr_count <= 0:
+        return 0.0
+    return 1.0 + (pr_count - 1) * FOLLOW_ON_PR_WEIGHT
+
+
+async def _current_loads(session: AsyncSession) -> dict[str, float]:
+    """person_id -> current review load in points, half-price per follow-on PR.
+
+    Grouped by task, not by PR: a task can be 5 PRs across 5 repos (the "Web
+    UI notification" batch of 2026-09-28 was exactly that). An un-keyed PR is
+    its own group of one and so still costs exactly 1, via assignment_id
+    standing in for a key nobody shares.
+
+    The per-group arithmetic is done here rather than in SQL -- it's one
+    weighting rule that the team will want to argue about, and it's far easier
+    to read, change and unit-test as a Python function than as a CASE
+    expression buried in a query.
     """
     result = await session.execute(
         select(
             ReviewAssignment.assignee_id,
-            func.count(
-                distinct(
-                    func.coalesce(
-                        ReviewAssignment.group_key,
-                        cast(ReviewAssignment.assignment_id, String),
-                    )
-                )
-            ),
+            func.coalesce(
+                ReviewAssignment.group_key,
+                cast(ReviewAssignment.assignment_id, String),
+            ).label("group"),
+            func.count(),
         )
         .where(ReviewAssignment.resolved_at.is_(None))
-        .group_by(ReviewAssignment.assignee_id)
+        .group_by(ReviewAssignment.assignee_id, "group")
     )
-    return {str(person_id): count for person_id, count in result.all()}
+
+    loads: dict[str, float] = {}
+    for person_id, _group, pr_count in result.all():
+        loads[str(person_id)] = loads.get(str(person_id), 0.0) + group_load_points(pr_count)
+    return loads
 
 
 async def _group_holder(

@@ -12,9 +12,11 @@ always-on-process requirement; a normal (even free-tier) web host is fine.
 ## How it works
 
 1. GitHub webhook (`pull_request: opened`) hits `POST /github/webhook`.
-2. The picker (`src/picker.py`) excludes the PR's author, finds whoever
-   among the remaining 3 has the fewest currently-open review assignments,
-   and picks randomly among anyone tied for that minimum.
+2. If the PR title carries a task key that someone already holds, it goes
+   straight to them (see *Task grouping* below). Otherwise the picker
+   (`src/picker.py`) excludes the PR's author, finds whoever among the
+   remaining 3 carries the fewest review points, and picks randomly among
+   anyone tied for that minimum.
 3. Posts in the configured Discord channel via the webhook, as **น้องโกโก้**,
    tagging that person (`<@discord_id>`) with one of a few random กวนๆ lines.
 4. On `pull_request: closed` (merged or not), their open assignment for
@@ -33,6 +35,73 @@ always-on-process requirement; a normal (even free-tier) web host is fine.
    holding, without waiting for the 19:00 post. Reply goes in-channel and
    marks anything over 2 days old with 🔥, the same threshold the daily
    reminder's dragon uses.
+
+## Task grouping — keeping one task with one reviewer
+
+One task often spans several repos, so it opens several PRs. Assigned
+independently, they scatter across the team and somebody has to transfer them
+back by hand. Instead, the bot reads the **task key** out of the PR title:
+the first PR of a key goes through the normal picker, and every later PR
+carrying that key goes to whoever already holds it.
+
+### How to use it
+
+Put the key in the PR title. Both styles the team already writes work:
+
+```
+feat(sentry): add error tracking — web-app (X-2d)     -> key x2d
+feat(x6d): gate production deploy behind a GitHub Env  -> key x6d
+test(US2-5): autofill pipeline parity e2e (#106)       -> key us25
+```
+
+Rules, in full:
+
+- A key is a bracketed token containing **both a letter and a digit**. That's
+  what separates `(X-2d)` from `(#106)` (a PR reference) and `feat(logging):`
+  (a plain conventional-commit scope) — neither of those is treated as a key.
+- Case and hyphens don't matter: `(X-2d)`, `(x-2d)` and `(x2d)` are one group.
+  The flip side is that `US2-5` and `US25` collide; use one spelling.
+- **No key is completely fine.** The PR just goes through the normal
+  load-balancing picker, exactly as before. Most PRs have no key. The bot
+  adds one quiet line to the announcement mentioning the option — delete
+  `NO_KEY_HINT` in `src/discord_notify.py` if it gets old.
+- The bot only groups PRs whose reviewer isn't the PR's own author.
+
+When a PR is routed by group, the announcement says so outright, naming the
+earlier PR and how long ago it was assigned — PRs of one task often land days
+apart, and without a reason the pick just looks like the bot ignoring load.
+
+### What a grouped task costs its reviewer
+
+The first PR of a task costs a full point; every further PR of that same task
+costs **half**. So 5 PRs of one task = `1 + 4 × 0.5` = **3 points**. Separate
+un-keyed PRs still cost 1 each, so five of those cost 5.
+
+Both extremes were worse than this. Charging all 5 points meant the holder
+was skipped for days and then — when the whole batch merged at once — dropped
+to zero and caught the next several PRs in a row, a bigger swing than the one
+being fixed. Charging 1 point total meant someone already reading five diffs
+looked exactly as free as someone holding a single PR.
+
+To change the weighting, edit `FOLLOW_ON_PR_WEIGHT` in `src/reviews.py`
+(`0.5` → `1.0` restores plain per-PR counting; `0.0` makes a whole task cost
+one point).
+
+### Migrating an existing database
+
+`src/seed.py` only runs `create_all`, which never alters an existing table,
+so a DB seeded before this feature needs the column added once. **Run this
+before deploying the new code** — the service selects `group_key` and will
+error on every request until the column exists.
+
+```bash
+python -m src.migrate_group_key           # dry run, prints what it would do
+python -m src.migrate_group_key --apply
+```
+
+It also backfills keys from the PR titles already stored on old rows, so
+tasks that are mid-flight at deploy time group correctly instead of each
+looking brand new. Safe to re-run.
 
 Load is derived from an event log (`review_assignment`, open/resolved rows),
 not a mutable counter — a missed or duplicated webhook event can't leave a
