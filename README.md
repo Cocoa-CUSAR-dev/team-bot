@@ -36,72 +36,39 @@ always-on-process requirement; a normal (even free-tier) web host is fine.
    marks anything over 2 days old with 🔥, the same threshold the daily
    reminder's dragon uses.
 
-## Task grouping — keeping one task with one reviewer
+## Task grouping
 
-One task often spans several repos, so it opens several PRs. Assigned
-independently, they scatter across the team and somebody has to transfer them
-back by hand. Instead, the bot reads the **task key** out of the PR title:
-the first PR of a key goes through the normal picker, and every later PR
-carrying that key goes to whoever already holds it.
-
-### How to use it
-
-Put the key in the PR title. Both styles the team already writes work:
+Put a task key in the PR title and every PR carrying it goes to one reviewer —
+first one picked normally, the rest follow it. No key, no change in behaviour.
 
 ```
-feat(sentry): add error tracking — web-app (X-2d)     -> key x2d
-feat(x6d): gate production deploy behind a GitHub Env  -> key x6d
-test(US2-5): autofill pipeline parity e2e (#106)       -> key us25
+feat(sentry): add error tracking — web-app (X-2d)      -> x2d
+feat(x6d): gate production deploy behind a GitHub Env  -> x6d
+test(US2-5): autofill pipeline parity e2e (#106)       -> us25
+Feat web UI notification                               -> none, picker decides
 ```
 
-Rules, in full:
+A key is a bracketed token with **a letter and a digit** — that rules out
+`(#106)` and `feat(logging):`. Normalised `[^a-z0-9]` → `""`, so `(X-2d)` ==
+`(x2d)`, and `US2-5` == `US25` (don't mix spellings). Parser and its edge
+cases: `src/grouping.py`, `tests/test_grouping.py`.
 
-- A key is a bracketed token containing **both a letter and a digit**. That's
-  what separates `(X-2d)` from `(#106)` (a PR reference) and `feat(logging):`
-  (a plain conventional-commit scope) — neither of those is treated as a key.
-- Case and hyphens don't matter: `(X-2d)`, `(x-2d)` and `(x2d)` are one group.
-  The flip side is that `US2-5` and `US25` collide; use one spelling.
-- **No key is completely fine.** The PR just goes through the normal
-  load-balancing picker, exactly as before. Most PRs have no key. The bot
-  adds one quiet line to the announcement mentioning the option — delete
-  `NO_KEY_HINT` in `src/discord_notify.py` if it gets old.
-- The bot only groups PRs whose reviewer isn't the PR's own author.
+Never routes a PR to its own author — falls back to the picker.
 
-When a PR is routed by group, the announcement says so outright, naming the
-earlier PR and how long ago it was assigned — PRs of one task often land days
-apart, and without a reason the pick just looks like the bot ignoring load.
+Follow-on announcements name the predecessor PR and its age, since a group's
+PRs often land days apart.
 
-### What a grouped task costs its reviewer
+**Load:** `1 + (n-1)*0.5` per task, so 5 PRs of one task = 3 points, 5 loose
+PRs = 5. Weighting: `FOLLOW_ON_PR_WEIGHT` in `src/reviews.py` (`1.0` = plain
+per-PR count, `0.0` = whole task costs 1).
 
-The first PR of a task costs a full point; every further PR of that same task
-costs **half**. So 5 PRs of one task = `1 + 4 × 0.5` = **3 points**. Separate
-un-keyed PRs still cost 1 each, so five of those cost 5.
-
-Both extremes were worse than this. Charging all 5 points meant the holder
-was skipped for days and then — when the whole batch merged at once — dropped
-to zero and caught the next several PRs in a row, a bigger swing than the one
-being fixed. Charging 1 point total meant someone already reading five diffs
-looked exactly as free as someone holding a single PR.
-
-To change the weighting, edit `FOLLOW_ON_PR_WEIGHT` in `src/reviews.py`
-(`0.5` → `1.0` restores plain per-PR counting; `0.0` makes a whole task cost
-one point).
-
-### Migrating an existing database
-
-`src/seed.py` only runs `create_all`, which never alters an existing table,
-so a DB seeded before this feature needs the column added once. **Run this
-before deploying the new code** — the service selects `group_key` and will
-error on every request until the column exists.
+**Migration — run before deploying**, `create_all` won't add the column and
+every request selects it:
 
 ```bash
-python -m src.migrate_group_key           # dry run, prints what it would do
-python -m src.migrate_group_key --apply
+python -m src.migrate_group_key           # dry run
+python -m src.migrate_group_key --apply   # + backfills keys from stored titles
 ```
-
-It also backfills keys from the PR titles already stored on old rows, so
-tasks that are mid-flight at deploy time group correctly instead of each
-looking brand new. Safe to re-run.
 
 Load is derived from an event log (`review_assignment`, open/resolved rows),
 not a mutable counter — a missed or duplicated webhook event can't leave a
