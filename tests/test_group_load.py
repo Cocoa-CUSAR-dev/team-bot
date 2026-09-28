@@ -48,8 +48,8 @@ def test_picker_prefers_the_lighter_load_across_fractional_points() -> None:
     holding a single PR (1.0) -- the half-price rule discounts, it doesn't
     make a group free.
     """
-    group_holder = Candidate(person_id="a", github_username="a", open_review_count=2.0)
-    lighter = Candidate(person_id="b", github_username="b", open_review_count=1.0)
+    group_holder = Candidate(person_id="a", github_username="a", recent_load=2.0)
+    lighter = Candidate(person_id="b", github_username="b", recent_load=1.0)
 
     chosen = pick_reviewer(
         candidates=[group_holder, lighter], author_github_username="someone-else"
@@ -62,8 +62,8 @@ def test_group_holder_is_still_reachable_once_they_are_the_lightest() -> None:
     """The flip side: discounting means they come back into rotation sooner
     than a linear count would allow.
     """
-    group_holder = Candidate(person_id="a", github_username="a", open_review_count=2.0)
-    busier = Candidate(person_id="b", github_username="b", open_review_count=3.0)
+    group_holder = Candidate(person_id="a", github_username="a", recent_load=2.0)
+    busier = Candidate(person_id="b", github_username="b", recent_load=3.0)
 
     chosen = pick_reviewer(
         candidates=[group_holder, busier], author_github_username="someone-else"

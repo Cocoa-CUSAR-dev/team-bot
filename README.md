@@ -15,8 +15,8 @@ always-on-process requirement; a normal (even free-tier) web host is fine.
 2. If the PR title carries a task key that someone already holds, it goes
    straight to them (see *Task grouping* below). Otherwise the picker
    (`src/picker.py`) excludes the PR's author, finds whoever among the
-   remaining 3 carries the fewest review points, and picks randomly among
-   anyone tied for that minimum.
+   remaining 3 has been dealt the least work in the last 14 days (finished
+   or not), and picks randomly among anyone tied for that minimum.
 3. Posts in the configured Discord channel via the webhook, as **น้องโกโก้**,
    tagging that person (`<@discord_id>`) with one of a few random กวนๆ lines.
 4. On `pull_request: closed` (merged or not), their open assignment for
@@ -58,9 +58,17 @@ Never routes a PR to its own author — falls back to the picker.
 Follow-on announcements name the predecessor PR and its age, since a group's
 PRs often land days apart.
 
-**Load:** `1 + (n-1)*0.5` per task, so 5 PRs of one task = 3 points, 5 loose
-PRs = 5. Weighting: `FOLLOW_ON_PR_WEIGHT` in `src/reviews.py` (`1.0` = plain
-per-PR count, `0.0` = whole task costs 1).
+**Load** is work *dealt out* in the last 14 days, finished or not — not the
+size of your open queue. Ties break on who has less still unreviewed.
+
+Counting only open reviews punished the fast reviewer: finishing dropped you
+to zero and the next PR came straight back, while sitting on six untouched
+PRs kept you looking busy. On live data that put the person with 30 finished
+and 2 open first in line for the next PR; under the current rule they're last.
+
+One task costs `1 + (n-1)*0.5` points, so 5 PRs of one task = 3, five loose
+PRs = 5. Knobs, both in `src/reviews.py`: `LOAD_WINDOW` (14 days) and
+`FOLLOW_ON_PR_WEIGHT` (`1.0` = plain per-PR count, `0.0` = whole task costs 1).
 
 **Migration — run before deploying**, `create_all` won't add the column and
 every request selects it:

@@ -3,9 +3,20 @@ so it's trivially unit-testable. Callers fetch current load and hand it in.
 
 Rules:
   1. Never the PR's own author.
-  2. Always draw from whoever currently carries the fewest review points
-     (see reviews.group_load_points -- a task's follow-on PRs count half).
-  3. Within a tie, prefer not repeating whoever was *just* assigned
+  2. Always draw from whoever has been given the least work RECENTLY --
+     assignments inside a rolling window, finished or not (see
+     reviews.recent_load_points).
+
+     This used to count only still-open reviews, which punished whoever
+     reviewed fastest: finishing dropped your load to zero and the very next
+     PR came straight back to you, while someone sitting on six untouched PRs
+     looked "busy" and was left alone. Reported 2026-09-28 by the person with
+     30 finished reviews and 2 open, who was still first in line for the next
+     one. Counting work *dealt out* rather than work *pending* removes the
+     incentive to sit on a queue.
+  3. Ties on recent work break on who's carrying the bigger open backlog, so
+     the fast reviewer wins a tie against someone equally-dealt but stuck.
+  4. Within a tie, prefer not repeating whoever was *just* assigned
      (globally, not per-repo) -- unless they're the only person left in
      the tie, in which case repeating them is correct, not a bug: with
      more PRs open than people, someone has to double up, and picking
@@ -26,10 +37,14 @@ from dataclasses import dataclass
 class Candidate:
     person_id: str
     github_username: str
-    # Points, not a PR count -- follow-on PRs of one task are half-price. See
-    # reviews.group_load_points. Floats compare and tie fine here: the values
-    # are sums of 0.5s, so equal loads really are exactly equal.
-    open_review_count: float
+    # Both are points, not PR counts -- follow-on PRs of one task are
+    # half-price (see reviews.group_load_points). Floats tie exactly here:
+    # they're sums of 0.5s, not measurements.
+    #
+    # recent_load decides; open_load only breaks ties between people who were
+    # dealt the same amount, favouring whoever has less still sitting there.
+    recent_load: float
+    open_load: float = 0.0
 
 
 def pick_reviewer(
@@ -45,8 +60,11 @@ def pick_reviewer(
     if not pool:
         return None
 
-    min_load = min(c.open_review_count for c in pool)
-    least_loaded = [c for c in pool if c.open_review_count == min_load]
+    def load_key(c: Candidate) -> tuple[float, float]:
+        return (c.recent_load, c.open_load)
+
+    min_load = min(load_key(c) for c in pool)
+    least_loaded = [c for c in pool if load_key(c) == min_load]
 
     if last_assigned_github_username is not None and len(least_loaded) > 1:
         without_last = [

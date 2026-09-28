@@ -4,7 +4,7 @@ the selection rule itself needs no DB/mocking to test.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,18 +66,26 @@ def group_load_points(pr_count: int) -> float:
     return 1.0 + (pr_count - 1) * FOLLOW_ON_PR_WEIGHT
 
 
-async def _current_loads(session: AsyncSession) -> dict[str, float]:
-    """person_id -> current review load in points, half-price per follow-on PR.
+# How far back "recently" reaches when measuring who's been given work.
+# Long enough that finishing a review doesn't instantly make you the next
+# target, short enough that a quiet fortnight resets the ledger rather than
+# someone's contribution from two months ago still steering picks today.
+LOAD_WINDOW = timedelta(days=14)
 
-    Grouped by task, not by PR: a task can be 5 PRs across 5 repos (the "Web
-    UI notification" batch of 2026-09-28 was exactly that). An un-keyed PR is
-    its own group of one and so still costs exactly 1, via assignment_id
-    standing in for a key nobody shares.
 
-    The per-group arithmetic is done here rather than in SQL -- it's one
-    weighting rule that the team will want to argue about, and it's far easier
-    to read, change and unit-test as a Python function than as a CASE
-    expression buried in a query.
+async def _group_points_by_person(
+    session: AsyncSession, *conditions
+) -> dict[str, float]:
+    """person_id -> points, grouped by task so follow-on PRs are half-price.
+
+    A task can be 5 PRs across 5 repos (the "Web UI notification" batch of
+    2026-09-28 was exactly that). An un-keyed PR is its own group of one and
+    still costs exactly 1, via assignment_id standing in for a key nobody
+    shares.
+
+    The per-group arithmetic is in Python rather than SQL: it's the one rule
+    here the team will actually want to argue about, so it should be easy to
+    read, change and unit-test instead of buried in a CASE expression.
     """
     result = await session.execute(
         select(
@@ -88,14 +96,39 @@ async def _current_loads(session: AsyncSession) -> dict[str, float]:
             ).label("group"),
             func.count(),
         )
-        .where(ReviewAssignment.resolved_at.is_(None))
+        .where(*conditions)
         .group_by(ReviewAssignment.assignee_id, "group")
     )
 
-    loads: dict[str, float] = {}
+    points: dict[str, float] = {}
     for person_id, _group, pr_count in result.all():
-        loads[str(person_id)] = loads.get(str(person_id), 0.0) + group_load_points(pr_count)
-    return loads
+        points[str(person_id)] = points.get(str(person_id), 0.0) + group_load_points(pr_count)
+    return points
+
+
+async def recent_load_points(
+    session: AsyncSession, *, now: datetime | None = None
+) -> dict[str, float]:
+    """Work DEALT OUT to each person inside LOAD_WINDOW, finished or not.
+
+    This is the number the picker balances on. Counting only unfinished
+    reviews -- what this did until 2026-09-28 -- meant clearing your queue
+    dropped your load to zero and sent the next PR straight back to you,
+    while sitting on six untouched PRs kept you looking busy and left alone.
+    Whoever reviews fastest should not be the person who gets handed the most.
+    """
+    now = now or datetime.now(UTC)
+    return await _group_points_by_person(
+        session, ReviewAssignment.assigned_at >= now - LOAD_WINDOW
+    )
+
+
+async def open_load_points(session: AsyncSession) -> dict[str, float]:
+    """Still-unresolved work. Only breaks ties in the picker -- someone who's
+    been dealt the same amount recently but has more of it still sitting there
+    is the worse choice for the next PR.
+    """
+    return await _group_points_by_person(session, ReviewAssignment.resolved_at.is_(None))
 
 
 async def _group_holder(
@@ -189,14 +222,16 @@ async def assign_reviewer(
             )
 
     people = (await session.execute(select(Person))).scalars().all()
-    loads = await _current_loads(session)
+    recent = await recent_load_points(session)
+    still_open = await open_load_points(session)
     last_assigned = await _last_assigned_github_username(session)
 
     candidates = [
         Candidate(
             person_id=str(p.person_id),
             github_username=p.github_username,
-            open_review_count=loads.get(str(p.person_id), 0),
+            recent_load=recent.get(str(p.person_id), 0.0),
+            open_load=still_open.get(str(p.person_id), 0.0),
         )
         for p in people
     ]

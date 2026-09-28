@@ -3,9 +3,12 @@ import random
 from src.picker import Candidate, pick_reviewer
 
 
-def _candidates(**loads: int) -> list[Candidate]:
+def _candidates(**loads: float) -> list[Candidate]:
+    """Loads here are RECENT work dealt out, which is what the picker balances
+    on -- not the still-open backlog, which only breaks ties.
+    """
     return [
-        Candidate(person_id=name, github_username=name, open_review_count=load)
+        Candidate(person_id=name, github_username=name, recent_load=load)
         for name, load in loads.items()
     ]
 
