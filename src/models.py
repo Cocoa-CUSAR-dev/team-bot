@@ -53,3 +53,9 @@ class ReviewAssignment(Base):
     # Nullable since rows from before this existed won't have them.
     pr_title: Mapped[str | None] = mapped_column(String, nullable=True)
     pr_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Task key parsed out of pr_title (see grouping.py) -- every PR of one
+    # task goes to whoever already holds that task, instead of each being
+    # load-balanced on its own and then transferred by hand.
+    # Nullable and expected to be: plenty of PRs carry no key, and those keep
+    # going through the normal picker.
+    group_key: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

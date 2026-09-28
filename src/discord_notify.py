@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from src.config import settings
-from src.reviews import OpenReview
+from src.reviews import GroupPredecessor, OpenReview
 
 BOT_USERNAME = "🍫 น้องโกโก้"
 
@@ -113,13 +113,59 @@ def _rate_limit_wait_seconds(response: httpx.Response) -> float:
         return 1.0
 
 
+# Shown when a PR's title carries no task key, so nobody has to wonder why
+# related PRs scattered to different reviewers. A hint, not a scolding --
+# opening a PR without a key is a perfectly fine thing to do.
+NO_KEY_HINT = (
+    "_ชื่อ PR ไม่มี task key เลยสุ่มตามปกติ — ใส่ `(X-2d)` ไว้ในชื่อ PR "
+    "ถ้าอยากให้ PR ชุดเดียวกันไปถึงคนรีวิวคนเดียวกัน_"
+)
+
+
+def describe_group_follow_on(
+    *, group_key: str, predecessor: GroupPredecessor, now: datetime | None = None
+) -> str:
+    """Says WHY this wasn't a fresh draw, naming the earlier PR it follows.
+
+    Worth the extra line: PRs of one task often arrive days apart (the sentry
+    batch spanned 2026-09-25 to 09-26), so with no reason given the pick just
+    looks like the bot forgot to spread the load.
+    """
+    now = now or datetime.now(UTC)
+    days = (now - predecessor.assigned_at).days
+    when = "เมื่อกี้นี้" if days == 0 else f"เมื่อ {days} วันก่อน"
+    lines = [
+        (
+            f"↳ อันนี้ไม่ได้สุ่มนะ — PR นี้อยู่ task `{group_key}` เดียวกับ "
+            f"**{predecessor.repo}#{predecessor.pr_number}** ที่รับไป{when} "
+            "เลยส่งให้คนเดิมดูทั้งชุด จะได้ไม่ต้องไล่บริบทใหม่"
+        ),
+    ]
+    if predecessor.pr_url:
+        lines.append(f"   ใบก่อนหน้า: {predecessor.pr_url}")
+    return "\n".join(lines)
+
+
 async def announce_assignment(*, repo: str, pr_number: int, pr_title: str, pr_url: str,
-                               reviewer_discord_id: str, author_github_username: str) -> None:
-    teasing = random.choice(TEASING_LINES)
+                               reviewer_discord_id: str, author_github_username: str,
+                               group_key: str | None = None,
+                               predecessor: GroupPredecessor | None = None) -> None:
+    if predecessor is not None and group_key is not None:
+        opening = "รับรีวิวต่อจากชุดเดิมจ้า! 🔗"
+        footer = "\n" + describe_group_follow_on(
+            group_key=group_key, predecessor=predecessor
+        )
+    else:
+        opening = f"ถึงคิวรีวิวแล้วจ้า! {random.choice(TEASING_LINES)}"
+        # A key that's new to us still went through the normal picker, so the
+        # hint would be wrong there -- only nudge when there's no key at all.
+        footer = "" if group_key else "\n" + NO_KEY_HINT
+
     await _post(
-        f"<@{reviewer_discord_id}> ถึงคิวรีวิวแล้วจ้า! {teasing}\n"
+        f"<@{reviewer_discord_id}> {opening}\n"
         f"**{repo}#{pr_number}** — {pr_title}\n"
         f"เปิดโดย `{author_github_username}` — {pr_url}"
+        f"{footer}"
     )
 
 

@@ -56,7 +56,7 @@ async def webhook(
 
     if action == "opened":
         async with async_session_maker() as session:
-            reviewer = await assign_reviewer(
+            assignment = await assign_reviewer(
                 session,
                 repo=repo,
                 pr_number=pr_number,
@@ -72,7 +72,7 @@ async def webhook(
         # above and double-assign the same PR. Log and move on instead --
         # the assignment already happened even if nobody got pinged.
         try:
-            if reviewer is None:
+            if assignment is None:
                 await announce_no_reviewer_available(repo=repo, pr_number=pr_number, pr_title=pr["title"])
             else:
                 await announce_assignment(
@@ -80,8 +80,10 @@ async def webhook(
                     pr_number=pr_number,
                     pr_title=pr["title"],
                     pr_url=pr["html_url"],
-                    reviewer_discord_id=reviewer.discord_id,
+                    reviewer_discord_id=assignment.person.discord_id,
                     author_github_username=pr["user"]["login"],
+                    group_key=assignment.group_key,
+                    predecessor=assignment.predecessor,
                 )
         except Exception:
             logger.exception(
