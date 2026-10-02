@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,6 +54,15 @@ class Settings(BaseSettings):
     DISCORD_GUILD_ID: str = ""
 
     WEBHOOK_PORT: int = 8090
+
+    # Pasting a secret into a hosting dashboard is how these get set, and a
+    # copy-paste that picks up a trailing space or newline produces a value
+    # that LOOKS right in the UI and fails at request time. Cheap to strip,
+    # and nothing here is ever meant to carry leading/trailing whitespace.
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip_whitespace(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 settings = Settings()  # type: ignore[call-arg]
