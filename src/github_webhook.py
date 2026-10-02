@@ -18,7 +18,13 @@ from src.discord_notify import (
     announce_no_reviewer_available,
     announce_review_done,
 )
-from src.reviews import assign_reviewer, get_person_by_github_username, resolve_reviews
+from src.reviews import (
+    assign_reviewer,
+    get_person_by_github_username,
+    is_pr_closed,
+    record_closed_pr,
+    resolve_reviews,
+)
 
 router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
@@ -56,6 +62,20 @@ async def webhook(
 
     if action == "opened":
         async with async_session_maker() as session:
+            # The close may already have been processed -- these two events
+            # can be seconds apart and arrive out of order (chatbot#72 was
+            # merged 4s before its own `opened` finished writing). Assigning
+            # now would create a review nothing can ever resolve, so it would
+            # haunt the daily reminder forever.
+            if await is_pr_closed(session, repo=repo, pr_number=pr_number):
+                logger.info(
+                    "skipping assignment for %s#%s -- already closed before this "
+                    "`opened` event was processed",
+                    repo,
+                    pr_number,
+                )
+                return {"status": "already-closed"}
+
             assignment = await assign_reviewer(
                 session,
                 repo=repo,
@@ -95,6 +115,9 @@ async def webhook(
     elif action == "closed":
         author_github_username = pr["user"]["login"]
         async with async_session_maker() as session:
+            # Recorded whether or not there's anything to resolve right now --
+            # that's the whole point, a late `opened` needs to find this.
+            await record_closed_pr(session, repo=repo, pr_number=pr_number)
             resolved_reviewers = await resolve_reviews(session, repo=repo, pr_number=pr_number)
             author = await get_person_by_github_username(session, author_github_username)
 

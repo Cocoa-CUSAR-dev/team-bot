@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import String, cast, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.grouping import extract_group_key
-from src.models import Person, ReviewAssignment
+from src.models import ClosedPullRequest, Person, ReviewAssignment
 from src.picker import Candidate, pick_reviewer
 
 
@@ -258,6 +259,30 @@ async def assign_reviewer(
 
     person = next(p for p in people if str(p.person_id) == chosen.person_id)
     return AssignmentResult(person=person, group_key=group_key, predecessor=None)
+
+
+async def record_closed_pr(session: AsyncSession, *, repo: str, pr_number: int) -> None:
+    """Remember that this PR is closed, so an `opened` event that lands AFTER
+    the close (they can arrive seconds apart and be processed out of order)
+    doesn't leave an assignment nothing can ever resolve. ON CONFLICT DO
+    NOTHING because a reopened-then-closed PR will hit this twice.
+    """
+    await session.execute(
+        pg_insert(ClosedPullRequest)
+        .values(repo=repo, pr_number=pr_number)
+        .on_conflict_do_nothing()
+    )
+    await session.commit()
+
+
+async def is_pr_closed(session: AsyncSession, *, repo: str, pr_number: int) -> bool:
+    row = await session.execute(
+        select(ClosedPullRequest).where(
+            ClosedPullRequest.repo == repo,
+            ClosedPullRequest.pr_number == pr_number,
+        )
+    )
+    return row.scalars().first() is not None
 
 
 async def resolve_reviews(session: AsyncSession, *, repo: str, pr_number: int) -> list[Person]:

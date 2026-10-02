@@ -34,6 +34,27 @@ class Person(Base):
     display_name: Mapped[str] = mapped_column(String)
 
 
+class ClosedPullRequest(Base):
+    """PRs we've seen a `closed` event for.
+
+    Exists because the two events can be processed out of order. chatbot#72
+    was merged 4 seconds before its own `opened` event finished writing the
+    assignment row: resolve_reviews ran first, found nothing to close, and the
+    assignment that appeared afterwards could never be resolved by anything --
+    it just sat in the daily reminder forever (reported 2026-10-03, "กุตรวจไปแล้ว
+    ทำไมขึ้น"). Recording the close lets a late `opened` see it and resolve
+    itself immediately.
+    """
+
+    __tablename__ = "closed_pr"
+
+    repo: Mapped[str] = mapped_column(String, primary_key=True)
+    pr_number: Mapped[int] = mapped_column(primary_key=True)
+    closed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ReviewAssignment(Base):
     __tablename__ = "review_assignment"
 

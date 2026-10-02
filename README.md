@@ -70,6 +70,14 @@ One task costs `1 + (n-1)*0.5` points, so 5 PRs of one task = 3, five loose
 PRs = 5. Knobs, both in `src/reviews.py`: `LOAD_WINDOW` (14 days) and
 `FOLLOW_ON_PR_WEIGHT` (`1.0` = plain per-PR count, `0.0` = whole task costs 1).
 
+**Out-of-order events:** a PR can be merged seconds after it opens, and the
+two webhook deliveries can be processed in either order. A `closed` handled
+before its own `opened` used to leave an assignment nothing could ever resolve
+(chatbot#72, merged 4s before its assignment row was written -- it sat in the
+daily reminder until someone complained). Every close is now recorded in
+`closed_pr`, and an `opened` that finds its PR already there skips assignment
+entirely. Create the table with `python -m src.migrate_closed_pr`.
+
 **Migration — run before deploying**, `create_all` won't add the column and
 every request selects it:
 
