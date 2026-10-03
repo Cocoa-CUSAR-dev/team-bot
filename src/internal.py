@@ -12,7 +12,8 @@ from fastapi import APIRouter, Header, HTTPException, status
 
 from src.config import settings
 from src.database import async_session_maker
-from src.discord_notify import announce_assignment, announce_daily_reminder
+from src.discord_notify import _send_now, announce_assignment, announce_daily_reminder
+from src.outbox import flush
 from src.reviews import get_open_reviews
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -21,6 +22,18 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 def _verify_secret(provided: str | None) -> None:
     if not provided or not hmac.compare_digest(provided, settings.INTERNAL_TRIGGER_SECRET):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad or missing secret")
+
+
+@router.post("/flush-outbox", status_code=200)
+async def flush_outbox(
+    x_internal_secret: str | None = Header(default=None),
+) -> dict[str, int]:
+    """Retry queued messages. Called by cron, and opportunistically on every
+    GitHub webhook -- the queue drains as soon as the rate limit lifts rather
+    than waiting for the next scheduled run.
+    """
+    _verify_secret(x_internal_secret)
+    return await flush(_send_now)
 
 
 @router.post("/test-announce", status_code=200)

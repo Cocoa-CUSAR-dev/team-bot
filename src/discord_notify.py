@@ -8,14 +8,19 @@ real numeric Discord ID (Person.discord_id), not their username.
 """
 
 import asyncio
+import logging
 import random
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from src import outbox
 from src.config import settings
+from src.database import async_session_maker
 from src.reviews import GroupPredecessor, OpenReview
+
+logger = logging.getLogger(__name__)
 
 BOT_USERNAME = "🍫 น้องโกโก้"
 
@@ -87,7 +92,7 @@ class RateLimitedTooLong(RuntimeError):
 MAX_RATE_LIMIT_WAIT = 10.0
 
 
-async def _post(content: str) -> None:
+async def _send_now(content: str) -> None:
     # Discord rate-limits a single incoming webhook fairly aggressively, and
     # two PRs opened moments apart (e.g. a migration + the code that reads
     # it) both hit this within the same request-handling window often
@@ -110,6 +115,26 @@ async def _post(content: str) -> None:
                 continue
             response.raise_for_status()
             return
+
+
+async def _post(content: str) -> None:
+    """Send now, or queue so it isn't lost.
+
+    Anything already queued stays ahead of this message -- see outbox.py for
+    why order matters more than immediacy here.
+    """
+    async with async_session_maker() as session:
+        if await outbox.has_pending(session):
+            await outbox.enqueue(session, content)
+            logger.info("queued behind %s", "an earlier undelivered message")
+            return
+
+    try:
+        await _send_now(content)
+    except Exception as e:  # noqa: BLE001 -- the queue is the error handler
+        async with async_session_maker() as session:
+            await outbox.enqueue(session, content, error=f"{type(e).__name__}: {e}"[:500])
+        logger.warning("Discord post failed, queued for retry: %s: %s", type(e).__name__, e)
 
 
 def _rate_limit_wait_seconds(response: httpx.Response) -> float:

@@ -1,4 +1,4 @@
-"""_post's 429 handling -- see the 2026-09-01 database#32/chatbot#46 incident
+"""_send_now's 429 handling (_post wraps it with the outbox queue) -- see the 2026-09-01 database#32/chatbot#46 incident
 in discord_notify.py's comment: two PRs opened moments apart both posting to
 the same Discord webhook tripped its rate limit, and the resulting
 unhandled HTTPStatusError crashed the whole webhook request as a 500.
@@ -50,7 +50,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, statuses: list[int]) -> _ScriptedH
 async def test_single_429_is_retried_once_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     handler = _install(monkeypatch, [429, 204])
 
-    await dn._post("hi")  # must not raise
+    await dn._send_now("hi")  # must not raise
 
     assert handler.calls == 2
 
@@ -59,7 +59,7 @@ async def test_a_second_consecutive_429_still_raises(monkeypatch: pytest.MonkeyP
     handler = _install(monkeypatch, [429, 429])
 
     with pytest.raises(httpx.HTTPStatusError):
-        await dn._post("hi")
+        await dn._send_now("hi")
 
     # Only one retry, not an infinite/unbounded loop.
     assert handler.calls == 2
@@ -69,7 +69,7 @@ async def test_a_non_429_error_is_not_retried(monkeypatch: pytest.MonkeyPatch) -
     handler = _install(monkeypatch, [500])
 
     with pytest.raises(httpx.HTTPStatusError):
-        await dn._post("hi")
+        await dn._send_now("hi")
 
     assert handler.calls == 1
 

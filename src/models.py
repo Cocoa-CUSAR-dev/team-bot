@@ -12,7 +12,7 @@ permanently wrong the way an increment/decrement field could.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +53,34 @@ class ClosedPullRequest(Base):
     closed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class PendingAnnouncement(Base):
+    """Messages Discord wouldn't take, kept until it will.
+
+    Added 2026-10-03: Discord rate-limits the deployed service at the IP level
+    (429, Retry-After 491, while the same webhook answers a laptop instantly),
+    so assignments were landing in the DB with nobody getting pinged. The post
+    is the only part of this system with no durable record of its own, which
+    made it the only part that could silently lose work.
+
+    Stores the rendered text rather than the arguments that produced it: what
+    matters is delivering the exact message that was composed at the time, and
+    re-deriving it later would mean re-reading state that has since moved on.
+    """
+
+    __tablename__ = "pending_announcement"
+
+    announcement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ReviewAssignment(Base):

@@ -15,10 +15,12 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 from src.config import settings
 from src.database import async_session_maker
 from src.discord_notify import (
+    _send_now,
     announce_assignment,
     announce_no_reviewer_available,
     announce_review_done,
 )
+from src.outbox import flush
 from src.reviews import (
     assign_reviewer,
     get_person_by_github_username,
@@ -29,6 +31,21 @@ from src.reviews import (
 
 router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
+
+
+async def _drain_outbox() -> None:
+    """Opportunistic retry of anything Discord refused earlier.
+
+    Runs on every delivery so the queue drains the moment a rate limit lifts,
+    rather than sitting until the next scheduled flush. Cheap when empty: one
+    indexed query returning nothing.
+    """
+    try:
+        result = await flush(_send_now)
+        if result["sent"]:
+            logger.info("outbox: delivered %s queued message(s)", result["sent"])
+    except Exception:
+        logger.exception("outbox flush failed")
 
 
 async def _safe_announce(
@@ -80,6 +97,10 @@ async def webhook(
     pr = payload["pull_request"]
     repo = payload["repository"]["full_name"]
     pr_number = pr["number"]
+
+    # Before anything else: whatever is queued is older than this event,
+    # and order is the whole point of the queue.
+    background.add_task(_drain_outbox)
 
     if action == "opened":
         async with async_session_maker() as session:

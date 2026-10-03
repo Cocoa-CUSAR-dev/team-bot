@@ -1,0 +1,26 @@
+# Retries Discord messages that were queued because Discord refused them --
+# see src/outbox.py. The webhook handler already drains the queue on every
+# delivery, which covers the normal case; this is for the quiet stretch where
+# the rate limit lifts but no PR activity happens to trigger a drain, so an
+# assignment ping would otherwise sit unsent until the next PR.
+#
+# Every 15 minutes rather than more often: the IP-level limit that caused
+# this lasted ~8 minutes, and a free-tier service shouldn't be woken from
+# spin-down more than it needs to be. GitHub's cron is best-effort and can run
+# late under load -- fine here, nothing depends on the exact minute.
+
+name: Flush Discord outbox
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  flush:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retry queued Discord messages
+        run: |
+          curl -sf -X POST "${{ secrets.REVIEW_BOT_URL }}/internal/flush-outbox" \
+            -H "X-Internal-Secret: ${{ secrets.REVIEW_BOT_INTERNAL_SECRET }}"

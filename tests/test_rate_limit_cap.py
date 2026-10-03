@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from src import discord_notify
-from src.discord_notify import MAX_RATE_LIMIT_WAIT, RateLimitedTooLong, _post
+from src.discord_notify import MAX_RATE_LIMIT_WAIT, RateLimitedTooLong, _send_now
 
 
 class _Client:
@@ -61,7 +61,7 @@ async def test_long_rate_limit_gives_up_instead_of_sleeping(
     monkeypatch.setattr(discord_notify.httpx, "AsyncClient", lambda: client)
 
     with pytest.raises(RateLimitedTooLong) as excinfo:
-        await _post("hello")
+        await _send_now("hello")
 
     assert excinfo.value.retry_after == 491
     assert no_sleep == [], "must not sleep through a limit this long"
@@ -76,7 +76,7 @@ async def test_short_rate_limit_is_still_slept_through_and_retried(
     client = _Client([_429("1"), _204()])
     monkeypatch.setattr(discord_notify.httpx, "AsyncClient", lambda: client)
 
-    await _post("hello")
+    await _send_now("hello")
 
     assert no_sleep == [1.0]
     assert client.calls == 2
@@ -89,6 +89,6 @@ async def test_the_cap_is_the_boundary_not_an_approximation(
     client = _Client([_429(str(MAX_RATE_LIMIT_WAIT)), _204()])
     monkeypatch.setattr(discord_notify.httpx, "AsyncClient", lambda: client)
 
-    await _post("hello")  # exactly at the cap is allowed
+    await _send_now("hello")  # exactly at the cap is allowed
 
     assert no_sleep == [MAX_RATE_LIMIT_WAIT]

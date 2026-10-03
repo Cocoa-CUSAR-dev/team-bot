@@ -86,6 +86,35 @@ python -m src.migrate_group_key           # dry run
 python -m src.migrate_group_key --apply   # + backfills keys from stored titles
 ```
 
+## If Discord won't take a message
+
+Every post goes through a durable queue (`pending_announcement`, see
+`src/outbox.py`). If Discord refuses it, the message is stored and retried
+instead of being lost, and anything posted afterwards queues behind it rather
+than overtaking it -- a follow-on assignment saying "ต่อจาก X ที่ถืออยู่" has to
+arrive after the message it refers to.
+
+The queue is drained on every GitHub webhook delivery, and by a cron every 15
+minutes (`.github/workflows/flush-outbox.yml`) for quiet stretches. Manually:
+
+```bash
+curl -X POST "$REVIEW_BOT_URL/internal/flush-outbox" -H "X-Internal-Secret: $SECRET"
+```
+
+This exists because of 2026-10-03: Discord answered the deployed service with
+`429 Retry-After 491` while the same webhook answered a laptop instantly with
+4 of 5 requests left in the bucket -- an IP-level limit on the shared hosting
+egress, nothing the bot did. Two things made it much worse than it had to be,
+both now fixed: `_post` slept for the full Retry-After *inside the request*,
+which blew GitHub's ~10s delivery timeout and caused a redelivery (and a
+second assignment); and the message itself was then simply gone.
+
+A message Discord rejects 5 times is left behind rather than blocking
+everything behind it -- at that point it's malformed, not rate-limited.
+Diagnostics: `/internal/webhook-check` (verifies the URL without posting) and
+`/internal/test-announce` (runs the announcement path and returns the error
+instead of swallowing it).
+
 Load is derived from an event log (`review_assignment`, open/resolved rows),
 not a mutable counter — a missed or duplicated webhook event can't leave a
 raw counter permanently wrong the way it could with `count += 1` / `count -= 1`.
