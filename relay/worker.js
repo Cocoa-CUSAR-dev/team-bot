@@ -43,10 +43,18 @@ export default {
       return new Response("unauthorized", { status: 401 });
     }
 
-    const upstream = await fetch(env.DISCORD_WEBHOOK_URL, {
+    // arrayBuffer, not text: the body is forwarded byte for byte, so nothing
+    // here can mangle the Thai and the emoji every message is made of.
+    // Decoding and re-encoding would usually be harmless and is pure risk.
+    //
+    // The query string is carried over so ?wait=true works through the relay
+    // -- that's what makes Discord return the created message, which is the
+    // only way to check from outside that the text arrived intact.
+    const query = new URL(request.url).search;
+    const upstream = await fetch(env.DISCORD_WEBHOOK_URL + query, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: await request.text(),
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: await request.arrayBuffer(),
     });
 
     // Discord's status and Retry-After are passed through untouched: the
