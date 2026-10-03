@@ -1,0 +1,8 @@
+name = "cocoa-discord-relay"
+main = "worker.js"
+compatibility_date = "2026-10-03"
+
+# No vars here on purpose -- both values are secrets and are set with
+# `wrangler secret put`, which keeps them out of the repo:
+#   DISCORD_WEBHOOK_URL  the channel this relay may post to
+#   RELAY_SECRET         what review-bot sends in X-Relay-Secret

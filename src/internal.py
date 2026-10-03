@@ -98,6 +98,10 @@ async def webhook_check(
 
     report: dict[str, object] = {
         "configured": bool(url),
+        # Which route a real post would take -- webhook-check always tests the
+        # webhook itself, so without this it would look healthy while every
+        # actual message went through a misconfigured relay.
+        "route": "relay" if (settings.DISCORD_RELAY_URL and settings.DISCORD_RELAY_SECRET) else "direct",
         "webhook_id": webhook_id,
         "token_length": token_length,
         "host": url.split("/")[2] if url.count("/") >= 2 else None,

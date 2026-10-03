@@ -86,6 +86,40 @@ python -m src.migrate_group_key           # dry run
 python -m src.migrate_group_key --apply   # + backfills keys from stored titles
 ```
 
+## Posting through the relay (optional, recommended)
+
+Render's free tier NATs outbound traffic through an IP shared with everyone
+else on it, and on 2026-10-03 Discord's edge began refusing that IP outright
+-- `429 Retry-After 491`, then `3242` the same evening -- while the same
+webhook answered a laptop instantly with 4 of 5 requests left in its bucket.
+Nothing the bot sent was over any limit; the address it sent from was.
+
+`relay/` is a Cloudflare Worker that posts on the service's behalf. Discord
+sits behind Cloudflare, so the request barely leaves the network.
+
+```bash
+cd relay
+npx wrangler deploy
+npx wrangler secret put DISCORD_WEBHOOK_URL   # the channel it may post to
+npx wrangler secret put RELAY_SECRET          # any long random string
+```
+
+Then on Render set `DISCORD_RELAY_URL` to the deployed Worker URL and
+`DISCORD_RELAY_SECRET` to the same string. Both must be set or the relay is
+ignored and posting stays direct -- a URL without the secret would be rejected
+by the Worker on every message. `/internal/webhook-check` reports `route` so
+you can see which one is live.
+
+The Worker holds the Discord webhook URL itself, so the service never sends
+it: the relay can reach exactly one channel, which makes its own URL and
+secret far less dangerous to leak than the webhook would be. Discord's status
+and `Retry-After` are passed back untouched, so the rate-limit handling and
+the outbox cooldown keep working through it.
+
+There is no fallback from relay to direct. A silent fallback would resume
+posting from the very IP the relay exists to avoid, precisely when something
+is already wrong; the outbox holds the message instead.
+
 ## If Discord won't take a message
 
 Every post goes through a durable queue (`pending_announcement`, see

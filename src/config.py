@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # hour to propagate. Right-click the server > Copy Server ID.
     DISCORD_GUILD_ID: str = ""
 
+    # --- Discord relay (optional) --------------------------------------
+    # Set both to send through relay/worker.js instead of straight to
+    # discord.com. Empty means post directly, which is fine until the host's
+    # shared outbound IP gets refused by Discord's edge -- see relay/worker.js
+    # for what that looked like. Defaulted to "" for the same reason as the
+    # block above: a half-configured feature must not stop the bot starting.
+    DISCORD_RELAY_URL: str = ""
+    DISCORD_RELAY_SECRET: str = ""
+
     WEBHOOK_PORT: int = 8090
 
     # Pasting a secret into a hosting dashboard is how these get set, and a

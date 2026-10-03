@@ -92,6 +92,19 @@ class RateLimitedTooLong(RuntimeError):
 MAX_RATE_LIMIT_WAIT = 10.0
 
 
+def _destination() -> tuple[str, dict[str, str]]:
+    """Where to post: the relay when it's configured, Discord directly if not.
+
+    Deliberately no fallback from one to the other. A silent fallback to the
+    direct route would quietly resume posting from the IP the relay exists to
+    avoid, and would do it exactly when something is already wrong -- the
+    outbox holds the message instead, and the error says which route failed.
+    """
+    if settings.DISCORD_RELAY_URL and settings.DISCORD_RELAY_SECRET:
+        return settings.DISCORD_RELAY_URL, {"X-Relay-Secret": settings.DISCORD_RELAY_SECRET}
+    return settings.DISCORD_WEBHOOK_URL, {}
+
+
 async def _send_now(content: str) -> None:
     # Discord rate-limits a single incoming webhook fairly aggressively, and
     # two PRs opened moments apart (e.g. a migration + the code that reads
@@ -100,11 +113,13 @@ async def _send_now(content: str) -> None:
     # chatbot#46. A 429 carries exactly how long to wait, so one retry
     # after that (rather than giving up, or blindly retrying forever) is
     # enough to ride out a same-second double-post.
+    url, headers = _destination()
     async with httpx.AsyncClient() as client:
         for attempt in range(2):
             response = await client.post(
-                settings.DISCORD_WEBHOOK_URL,
+                url,
                 json={"username": BOT_USERNAME, "content": content},
+                headers=headers,
                 timeout=10,
             )
             if response.status_code == 429 and attempt == 0:
