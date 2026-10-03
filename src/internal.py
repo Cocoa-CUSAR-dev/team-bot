@@ -12,7 +12,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 
 from src.config import settings
 from src.database import async_session_maker
-from src.discord_notify import _send_now, announce_assignment, announce_daily_reminder
+from src.discord_notify import _send_now, announce_daily_reminder
 from src.outbox import flush
 from src.reviews import get_open_reviews
 
@@ -40,39 +40,28 @@ async def flush_outbox(
 async def test_announce(
     x_internal_secret: str | None = Header(default=None),
 ) -> dict[str, object]:
-    """Run the ASSIGNMENT announcement path on demand and report what it does.
+    """Can this service actually deliver a message to Discord right now?
 
-    The daily reminder posts fine while assignment announcements go missing,
-    and the difference between them is that the assignment path wraps its post
-    in try/except -- deliberately, so a Discord hiccup can't 500 the GitHub
-    webhook and cause a redelivery that double-assigns. The cost is that the
-    failure is invisible outside a log nobody can reach quickly. This calls
-    the same function with obviously-fake data and hands back the exception
-    instead of swallowing it.
+    Goes through `_send_now`, NOT `_post`: _post's whole job is to swallow a
+    failure and queue the message, which is right in production and useless in
+    a diagnostic -- it would answer "fine" while nothing reaches the channel.
+    This reports what Discord really said.
 
     Posts a visibly-labelled test message to the channel when it succeeds.
     """
     _verify_secret(x_internal_secret)
 
     try:
-        await announce_assignment(
-            repo="Cocoa-CUSAR-dev/review-bot",
-            pr_number=0,
-            pr_title="🔧 ทดสอบระบบแจ้งเตือน (ไม่ใช่ PR จริง)",
-            pr_url="https://github.com/Cocoa-CUSAR-dev/team-bot",
-            reviewer_discord_id="0",
-            author_github_username="review-bot",
-            group_key="selftest",
-        )
+        await _send_now("🔧 ทดสอบระบบส่งข้อความ (ไม่ใช่ PR จริง)")
     except Exception as e:  # noqa: BLE001 -- reporting it IS the point here
         return {
-            "posted": False,
+            "delivered": False,
             "error_type": type(e).__name__,
             "error": str(e)[:500],
-            "traceback": traceback.format_exc()[-2000:],
+            "traceback": traceback.format_exc()[-1500:],
         }
 
-    return {"posted": True}
+    return {"delivered": True}
 
 
 @router.post("/webhook-check", status_code=200)
