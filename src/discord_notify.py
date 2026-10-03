@@ -69,6 +69,24 @@ def choose_praise_line(reviewer_github_username: str, rng: random.Random | None 
     return rng.choice(PRAISE_LINES)
 
 
+class RateLimitedTooLong(RuntimeError):
+    """Discord asked us to wait longer than it's worth holding a request open."""
+
+    def __init__(self, retry_after: float) -> None:
+        super().__init__(f"Discord rate limit: retry after {retry_after:.0f}s")
+        self.retry_after = retry_after
+
+
+# A short 429 is a same-second double-post and worth sleeping through. A long
+# one is not: on 2026-10-03 Discord returned Retry-After 491 to the deployed
+# service while the exact same webhook answered instantly from a laptop --
+# an IP-level limit on the shared hosting egress, nothing this bot did. The
+# old code slept for however long it was told, which meant a GitHub webhook
+# request sat open for eight minutes, blew GitHub's 10s delivery timeout, and
+# got redelivered -- more posts, deeper limit. Give up fast instead.
+MAX_RATE_LIMIT_WAIT = 10.0
+
+
 async def _post(content: str) -> None:
     # Discord rate-limits a single incoming webhook fairly aggressively, and
     # two PRs opened moments apart (e.g. a migration + the code that reads
@@ -86,6 +104,8 @@ async def _post(content: str) -> None:
             )
             if response.status_code == 429 and attempt == 0:
                 retry_after = _rate_limit_wait_seconds(response)
+                if retry_after > MAX_RATE_LIMIT_WAIT:
+                    raise RateLimitedTooLong(retry_after)
                 await asyncio.sleep(retry_after)
                 continue
             response.raise_for_status()

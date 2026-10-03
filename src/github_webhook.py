@@ -8,8 +8,9 @@ Settings > Webhooks (or once at the org level, if that's set up).
 import hashlib
 import hmac
 import logging
+from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
 from src.config import settings
 from src.database import async_session_maker
@@ -30,6 +31,25 @@ router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
 
 
+async def _safe_announce(
+    announce: Callable[..., Awaitable[None]], **kwargs: object
+) -> None:
+    """Every Discord post runs through here, after the response has gone
+    back to GitHub. A failure must stay a log line: the DB is already the
+    source of truth, and anything that reaches GitHub as an error becomes a
+    redelivery, which re-runs the handler and double-assigns.
+    """
+    try:
+        await announce(**kwargs)
+    except Exception:
+        logger.exception(
+            "%s failed to post to Discord for %s#%s (the DB change still stands)",
+            getattr(announce, "__name__", announce),
+            kwargs.get("repo"),
+            kwargs.get("pr_number"),
+        )
+
+
 def _verify_signature(body: bytes, signature_header: str | None) -> None:
     if not signature_header or not signature_header.startswith("sha256="):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "missing signature")
@@ -45,6 +65,7 @@ def _verify_signature(body: bytes, signature_header: str | None) -> None:
 @router.post("/webhook", status_code=200)
 async def webhook(
     request: Request,
+    background: BackgroundTasks,
     x_github_event: str = Header(default=""),
     x_hub_signature_256: str | None = Header(default=None),
 ) -> dict[str, str]:
@@ -86,31 +107,31 @@ async def webhook(
             )
         # The DB write above is already committed at this point -- it's the
         # source of truth (see models.py), Discord is just an announcement.
-        # A post failure here (rate limit outlasting _post's one retry, a
-        # Discord outage, whatever) must never 500 this response: GitHub
-        # retries a failed delivery, which would re-run assign_reviewer
-        # above and double-assign the same PR. Log and move on instead --
-        # the assignment already happened even if nobody got pinged.
-        try:
-            if assignment is None:
-                await announce_no_reviewer_available(repo=repo, pr_number=pr_number, pr_title=pr["title"])
-            else:
-                await announce_assignment(
-                    repo=repo,
-                    pr_number=pr_number,
-                    pr_title=pr["title"],
-                    pr_url=pr["html_url"],
-                    reviewer_discord_id=assignment.person.discord_id,
-                    author_github_username=pr["user"]["login"],
-                    group_key=assignment.group_key,
-                    predecessor=assignment.predecessor,
-                )
-        except Exception:
-            logger.exception(
-                "assignment announcement failed to post to Discord for %s#%s "
-                "(assignment itself was still recorded)",
-                repo,
-                pr_number,
+        # It runs AFTER the response goes back to GitHub, because GitHub gives
+        # a delivery ~10s before calling it failed and redelivering it -- and
+        # a redelivery re-runs assign_reviewer and double-assigns. Posting
+        # inline risked exactly that on 2026-10-03, when a rate-limited post
+        # held the request open for minutes.
+        if assignment is None:
+            background.add_task(
+                _safe_announce,
+                announce_no_reviewer_available,
+                repo=repo,
+                pr_number=pr_number,
+                pr_title=pr["title"],
+            )
+        else:
+            background.add_task(
+                _safe_announce,
+                announce_assignment,
+                repo=repo,
+                pr_number=pr_number,
+                pr_title=pr["title"],
+                pr_url=pr["html_url"],
+                reviewer_discord_id=assignment.person.discord_id,
+                author_github_username=pr["user"]["login"],
+                group_key=assignment.group_key,
+                predecessor=assignment.predecessor,
             )
     elif action == "closed":
         author_github_username = pr["user"]["login"]
@@ -127,24 +148,19 @@ async def webhook(
         if pr.get("merged") and resolved_reviewers:
             for reviewer in resolved_reviewers:
                 # Same reasoning as the "opened" branch above: resolve_reviews
-                # already committed (marked resolved_at) -- a Discord hiccup
-                # here must not turn into a 500 and a duplicate resolve retry.
-                try:
-                    await announce_review_done(
-                        repo=repo,
-                        pr_number=pr_number,
-                        pr_title=pr["title"],
-                        pr_url=pr["html_url"],
-                        reviewer_display_name=reviewer.display_name,
-                        reviewer_github_username=reviewer.github_username,
-                        author_discord_id=author.discord_id if author else None,
-                        author_github_username=author_github_username,
-                    )
-                except Exception:
-                    logger.exception(
-                        "review-done announcement failed to post to Discord for %s#%s",
-                        repo,
-                        pr_number,
-                    )
+                # already committed (marked resolved_at), so the post happens
+                # after the response and can't delay or fail this delivery.
+                background.add_task(
+                    _safe_announce,
+                    announce_review_done,
+                    repo=repo,
+                    pr_number=pr_number,
+                    pr_title=pr["title"],
+                    pr_url=pr["html_url"],
+                    reviewer_display_name=reviewer.display_name,
+                    reviewer_github_username=reviewer.github_username,
+                    author_discord_id=author.discord_id if author else None,
+                    author_github_username=author_github_username,
+                )
 
     return {"status": "ok"}
