@@ -2,6 +2,7 @@
 the actual damage on 2026-10-03, not the rate limit itself.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Self
 
 import pytest
@@ -183,3 +184,64 @@ async def test_flush_stops_at_the_first_failure(monkeypatch: pytest.MonkeyPatch)
 # session above returns whatever rows it's given without filtering, so a test
 # written against it would assert the fake's behaviour rather than the query's.
 # Verified by hand against the real DB instead.
+
+
+@pytest.mark.anyio
+async def test_a_retry_after_stops_the_queue_knocking_again(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each rejected request is another 429 on the record, and the block
+    escalates with them -- 491s in the morning became 3242s by evening.
+    """
+    outbox.clear_cooldown()
+    items = [_Item("one")]
+    monkeypatch.setattr(outbox, "async_session_maker", lambda: _FakeSession(items))
+
+    attempts: list[str] = []
+
+    async def rate_limited(content: str) -> None:
+        attempts.append(content)
+        raise discord_notify.RateLimitedTooLong(3242)
+
+    first = await outbox.flush(rate_limited)
+    assert first["failed"] == 1
+    assert len(attempts) == 1
+
+    second = await outbox.flush(rate_limited)
+
+    assert len(attempts) == 1, "must not knock again during the cooldown"
+    assert second["cooldown_seconds"] > 3000
+    outbox.clear_cooldown()
+
+
+@pytest.mark.anyio
+async def test_the_queue_resumes_once_the_cooldown_passes(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outbox.clear_cooldown()
+    items = [_Item("one")]
+    monkeypatch.setattr(outbox, "async_session_maker", lambda: _FakeSession(items))
+
+    async def rate_limited(content: str) -> None:
+        raise discord_notify.RateLimitedTooLong(1)
+
+    await outbox.flush(rate_limited)
+    # Pretend the wait has elapsed rather than actually sleeping for it.
+    outbox._retry_not_before = datetime.now(UTC) - timedelta(seconds=1)
+
+    sent: list[str] = []
+
+    async def ok(content: str) -> None:
+        sent.append(content)
+
+    result = await outbox.flush(ok)
+
+    assert sent == ["one"]
+    assert result["sent"] == 1
+    outbox.clear_cooldown()
+
+
+def test_cooldown_remaining_is_zero_when_nothing_is_blocking() -> None:
+    outbox.clear_cooldown()
+
+    assert outbox.cooldown_remaining() == 0.0

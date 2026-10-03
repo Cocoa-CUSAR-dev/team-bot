@@ -13,7 +13,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from src.config import settings
 from src.database import async_session_maker
 from src.discord_notify import _send_now, announce_daily_reminder
-from src.outbox import flush
+from src.outbox import cooldown_remaining, flush
 from src.reviews import get_open_reviews
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -33,7 +33,11 @@ async def flush_outbox(
     than waiting for the next scheduled run.
     """
     _verify_secret(x_internal_secret)
-    return await flush(_send_now)
+    result = await flush(_send_now)
+    # Surfaced so "nothing happened" can be told apart from "deliberately
+    # waiting out a block" without reading logs.
+    result["cooldown_seconds"] = int(cooldown_remaining())
+    return result
 
 
 @router.post("/test-announce", status_code=200)
