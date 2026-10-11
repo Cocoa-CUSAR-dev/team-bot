@@ -47,18 +47,22 @@ class Candidate:
     open_load: float = 0.0
 
 
-def pick_reviewer(
+def shortlist(
     *,
     candidates: list[Candidate],
     author_github_username: str,
     last_assigned_github_username: str | None = None,
-    rng: random.Random | None = None,
-) -> Candidate | None:
-    rng = rng or random.Random()
+) -> list[Candidate]:
+    """Everyone the coin flip is actually between -- every rule above applied
+    except the flip itself.
 
+    Split out so /predict can show the real shortlist rather than a
+    reimplementation of it. A second copy of these rules would drift from this
+    one and then confidently mispredict.
+    """
     pool = [c for c in candidates if c.github_username != author_github_username]
     if not pool:
-        return None
+        return []
 
     def load_key(c: Candidate) -> tuple[float, float]:
         return (c.recent_load, c.open_load)
@@ -73,4 +77,23 @@ def pick_reviewer(
         if without_last:  # only drop them if it's not a forced repeat
             least_loaded = without_last
 
-    return rng.choice(least_loaded)
+    return least_loaded
+
+
+def pick_reviewer(
+    *,
+    candidates: list[Candidate],
+    author_github_username: str,
+    last_assigned_github_username: str | None = None,
+    rng: random.Random | None = None,
+) -> Candidate | None:
+    finalists = shortlist(
+        candidates=candidates,
+        author_github_username=author_github_username,
+        last_assigned_github_username=last_assigned_github_username,
+    )
+    if not finalists:
+        return None
+
+    rng = rng or random.Random()
+    return rng.choice(finalists)

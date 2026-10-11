@@ -22,13 +22,19 @@ from nacl.signing import VerifyKey
 
 from src.config import settings
 from src.database import async_session_maker
-from src.discord_notify import format_my_reviews
-from src.reviews import get_open_reviews, get_person_by_discord_id
+from src.discord_notify import format_my_reviews, format_prediction
+from src.predict import predict
+from src.reviews import (
+    LOAD_WINDOW,
+    get_open_reviews,
+    get_person_by_discord_id,
+)
 
 router = APIRouter(prefix="/discord", tags=["discord"])
 logger = logging.getLogger(__name__)
 
 MYREVIEWS_COMMAND = "myreviews"
+PREDICT_COMMAND = "predict"
 
 # Discord interaction types / response types we care about.
 _PING = 1
@@ -94,6 +100,17 @@ async def interactions(
         return {"type": _PONG}
 
     command_name = (payload.get("data") or {}).get("name")
+
+    if command_name == PREDICT_COMMAND:
+        # No invoking user needed: this reports on the whole roster, and it
+        # reads the same numbers the picker reads rather than guessing.
+        async with async_session_maker() as session:
+            prediction = await predict(session, window_days=LOAD_WINDOW.days)
+        return {
+            "type": _CHANNEL_MESSAGE_WITH_SOURCE,
+            "data": {"content": format_prediction(prediction)},
+        }
+
     if command_name != MYREVIEWS_COMMAND:
         logger.warning("unknown slash command %r", command_name)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "unknown command")

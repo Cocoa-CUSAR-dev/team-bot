@@ -16,14 +16,19 @@ import asyncio
 import httpx
 
 from src.config import settings
-from src.discord_interactions import MYREVIEWS_COMMAND
+from src.discord_interactions import MYREVIEWS_COMMAND, PREDICT_COMMAND
 
 COMMANDS = [
     {
         "name": MYREVIEWS_COMMAND,
         "description": "ดูว่าตอนนี้เราถือรีวิว PR อะไรค้างอยู่บ้าง",
         "type": 1,  # CHAT_INPUT
-    }
+    },
+    {
+        "name": PREDICT_COMMAND,
+        "description": "ดูแต้มของทุกคน และคาดเดาว่า PR ใบหน้าจะตกที่ใคร",
+        "type": 1,  # CHAT_INPUT
+    },
 ]
 
 

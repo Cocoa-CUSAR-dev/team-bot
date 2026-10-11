@@ -149,6 +149,12 @@ Diagnostics: `/internal/webhook-check` (verifies the URL without posting) and
 `/internal/test-announce` (runs the announcement path and returns the error
 instead of swallowing it).
 
+8. **`/predict`** shows everyone's points and who the next PR would land on,
+   per possible author. It calls `picker.shortlist` -- the same function
+   `pick_reviewer` draws from -- rather than re-deriving the rule, so a
+   prediction can't disagree with the assignment that follows. No mentions in
+   the reply: it names the whole roster, and people run it out of curiosity.
+
 Load is derived from an event log (`review_assignment`, open/resolved rows),
 not a mutable counter — a missed or duplicated webhook event can't leave a
 raw counter permanently wrong the way it could with `count += 1` / `count -= 1`.
@@ -221,7 +227,8 @@ One-time, in the [Discord Developer Portal](https://discord.com/developers/appli
    and save. Discord verifies it by sending deliberately-invalid signatures
    and expecting 401s — so the service must already be deployed with
    `DISCORD_PUBLIC_KEY` set before this save will succeed.
-5. Register the command from your laptop:
+5. Register the commands from your laptop (re-run this after adding one --
+   it's a bulk overwrite, so it's safe to repeat):
    ```bash
    python -m src.register_commands
    ```

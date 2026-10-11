@@ -340,3 +340,52 @@ def format_my_reviews(
 
     count = len(open_reviews)
     return f"{who} ตอนนี้ถือรีวิวอยู่ {count} รายการจ้า:\n" + "\n".join(lines)
+
+
+# Deliberately no <@id> mentions anywhere in the /predict reply. It names
+# every member every time, and this is the one command people will run out of
+# curiosity -- mentions would ping the whole team for a question nobody was
+# asked. Display names read fine here; /myreviews still mentions, because
+# there the ping IS the point.
+def format_prediction(prediction) -> str:
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣"]
+
+    lines = [
+        "🔮 **น้องโกโก้พยากรณ์** 🔮",
+        (
+            f"_นับงานที่ถูกแจกไปใน {prediction.window_days} วันล่าสุด "
+            "ไม่ว่าจะรีวิวจบแล้วหรือยัง — ปิดงานไวไม่ได้แปลว่าจะโดนงานใหม่ทันที_"
+        ),
+        "",
+        "**แต้มตอนนี้** (น้อย = คิวต้นๆ)",
+    ]
+    for i, s in enumerate(prediction.standings):
+        medal = medals[i] if i < len(medals) else "▫️"
+        lines.append(
+            f"{medal} **{s.display_name}** — {s.recent_load:g} แต้ม "
+            f"(ค้างรีวิวอยู่ {s.open_load:g})"
+        )
+
+    lines += ["", "**ถ้ามี PR ใหม่เข้ามาตอนนี้**"]
+    for outcome in prediction.outcomes:
+        if not outcome.finalists:
+            # Only possible if the author is the only person in the roster.
+            lines.append(f"• เปิดโดย `{outcome.author.display_name}` → ไม่มีใครรีวิวได้เลย 😵")
+            continue
+        names = " หรือ ".join(f"**{f.display_name}**" for f in outcome.finalists)
+        if len(outcome.finalists) == 1:
+            chance = "แน่นอน"
+        else:
+            chance = f"คนละ {100 // len(outcome.finalists)}%"
+        lines.append(f"• เปิดโดย `{outcome.author.display_name}` → {names} ({chance})")
+
+    lines += [
+        "",
+        "_คนเปิด PR ไม่เคยได้รีวิวงานตัวเอง รายชื่อเลยต่างกันตามคนเปิด_",
+    ]
+    if prediction.last_assigned:
+        lines.append(
+            f"_คนที่ได้งานล่าสุดคือ `{prediction.last_assigned}` "
+            "ถ้าแต้มเสมอกันจะถูกข้ามหนึ่งรอบ เว้นแต่เหลือคนเดียวจริงๆ_"
+        )
+    return "\n".join(lines)
